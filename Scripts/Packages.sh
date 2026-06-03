@@ -14,20 +14,26 @@ UPDATE_PACKAGE() {
 
   echo " "
 
-  # 删除本地可能存在的不同名称的软件包
+  # 删除本地可能存在的同名软件包
+  # 修复点：
+  # 1. 对 dae / vnt 这类短包名，不再使用 *dae* 模糊匹配，避免误删 libdaemon
+  # 2. 优先精确匹配目录名，只有长度大于 3 的包名才允许模糊匹配
   for NAME in "${PKG_LIST[@]}"; do
-    # 查找匹配的目录
     echo "Search directory: $NAME"
-    local FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "*$NAME*" 2>/dev/null)
 
-    # 删除找到的目录
+    if [ ${#NAME} -le 3 ]; then
+      FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d -iname "$NAME" 2>/dev/null)
+    else
+      FOUND_DIRS=$(find ../feeds/luci/ ../feeds/packages/ -maxdepth 3 -type d \( -iname "$NAME" -o -iname "*$NAME*" \) 2>/dev/null)
+    fi
+
     if [ -n "$FOUND_DIRS" ]; then
       while read -r DIR; do
         rm -rf "$DIR"
         echo "Delete directory: $DIR"
       done <<< "$FOUND_DIRS"
     else
-      echo "Not fonud directory: $NAME"
+      echo "Not found directory: $NAME"
     fi
   done
 
@@ -73,6 +79,7 @@ UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "" "v2dat"
 UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luci-i18n-lucky"
 
 # Daed：仓库克隆到 package/dae，内含 daed 与 luci-app-daed
+# 注意：UPDATE_PACKAGE 函数已修复短名称模糊删除问题，不会再误删 libdaemon
 UPDATE_PACKAGE "dae" "QiuSimons/luci-app-daed" "kix" "name" "daed luci-app-daed"
 
 UPDATE_PACKAGE "netspeedtest" "sirpdboy/netspeedtest" "main" "" "homebox ookla-speedtest"
