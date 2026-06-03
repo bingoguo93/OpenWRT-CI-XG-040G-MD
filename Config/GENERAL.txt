@@ -30,6 +30,12 @@ CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
 # MicroSocks
 CONFIG_PACKAGE_microsocks=y
 
+# 修复 avahi / samba4 依赖
+CONFIG_PACKAGE_libdaemon=y
+
+# 不需要 Samba4 局域网自动发现时关闭 Avahi 支持，减少 avahi/libdaemon 编译问题
+CONFIG_SAMBA4_SERVER_AVAHI=n
+
 #删除插件
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
 CONFIG_PACKAGE_luci-app-wol=n
