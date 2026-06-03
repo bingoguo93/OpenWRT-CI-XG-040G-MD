@@ -9,15 +9,13 @@ UPDATE_PACKAGE() {
   local PKG_REPO=$2
   local PKG_BRANCH=$3
   local PKG_SPECIAL=$4
-  local PKG_LIST=("$PKG_NAME" $5) # 第5个参数为自定义名称列表
+  local PKG_LIST=("$PKG_NAME" $5)
   local REPO_NAME=${PKG_REPO#*/}
 
   echo " "
 
   # 删除本地可能存在的同名软件包
-  # 修复点：
-  # 1. 对 dae / vnt 这类短包名，不再使用 *dae* 模糊匹配，避免误删 libdaemon
-  # 2. 优先精确匹配目录名，只有长度大于 3 的包名才允许模糊匹配
+  # 对 dae / vnt 这类短包名，不使用 *dae* 模糊匹配，避免误删 libdaemon
   for NAME in "${PKG_LIST[@]}"; do
     echo "Search directory: $NAME"
 
@@ -37,10 +35,8 @@ UPDATE_PACKAGE() {
     fi
   done
 
-  # 克隆 GitHub 仓库
   git clone --depth=1 --single-branch --branch $PKG_BRANCH "https://github.com/$PKG_REPO.git"
 
-  # 处理克隆的仓库
   if [[ "$PKG_SPECIAL" == "pkg" ]]; then
     find ./$REPO_NAME/*/ -maxdepth 3 -type d -iname "*$PKG_NAME*" -prune -exec cp -rf {} ./ \;
     rm -rf ./$REPO_NAME/
@@ -49,9 +45,38 @@ UPDATE_PACKAGE() {
   fi
 }
 
+PATCH_DAED_USER_AGENT() {
+  local DAED_MAKEFILE="./dae/daed/Makefile"
+
+  if [ ! -f "$DAED_MAKEFILE" ]; then
+    echo "Daed Makefile not found, skip User-Agent patch."
+    return 0
+  fi
+
+  python3 <<'PY'
+from pathlib import Path
+
+p = Path("./dae/daed/Makefile")
+s = p.read_text()
+
+needle = "git -C $(PKG_BUILD_DIR)/dae-core checkout $(CORE_HASH_SHORT) ; \\\n"
+insert = needle + "\tfind $(PKG_BUILD_DIR)/dae-core -type f -name '*.go' -exec sed -i 's/v2rayN\\/1\\.0/v2rayN\\/7.12.7/g; s/v2rayA\\/1\\.0/v2rayA\\/2.2.7/g' {} \\; ; \\\n"
+
+if "v2rayN\\/7\\.12\\.7" not in s:
+    if needle in s:
+        s = s.replace(needle, insert, 1)
+        p.write_text(s)
+        print("Daed subscription User-Agent patch inserted.")
+    else:
+        print("Daed checkout line not found, User-Agent patch was not inserted.")
+else:
+    print("Daed subscription User-Agent patch already exists.")
+PY
+}
+
 # 调用示例
 # UPDATE_PACKAGE "OpenAppFilter" "destan19/OpenAppFilter" "master" "" "custom_name1 custom_name2"
-# UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf" 这样会把原有的open-app-filter，luci-app-appfilter，oaf相关组件删除，不会出现coremark错误。
+# UPDATE_PACKAGE "open-app-filter" "destan19/OpenAppFilter" "master" "" "luci-app-appfilter oaf"
 # UPDATE_PACKAGE "包名" "项目地址" "项目分支" "pkg/name，可选，pkg为从大杂烩中单独提取包名插件；name为重命名为包名"
 
 UPDATE_PACKAGE "argon" "sbwml/luci-theme-argon" "openwrt-25.12"
@@ -60,27 +85,31 @@ UPDATE_PACKAGE "aurora" "eamonxg/luci-theme-aurora" "master"
 UPDATE_PACKAGE "aurora-config" "eamonxg/luci-app-aurora-config" "master"
 UPDATE_PACKAGE "kucat" "sirpdboy/luci-theme-kucat" "master"
 UPDATE_PACKAGE "kucat-config" "sirpdboy/luci-app-kucat-config" "master"
-UPDATE_PACKAGE "homeproxy" "VIKINGYFY/homeproxy" "main"
+
+# 已移除 homeproxy
+# UPDATE_PACKAGE "homeproxy" "VIKINGYFY/homeproxy" "main"
+
 UPDATE_PACKAGE "momo" "nikkinikki-org/OpenWrt-momo" "main"
 UPDATE_PACKAGE "nikki" "nikkinikki-org/OpenWrt-nikki" "main"
 UPDATE_PACKAGE "openclash" "vernesong/OpenClash" "dev" "pkg"
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg"
 UPDATE_PACKAGE "passwall2" "Openwrt-Passwall/openwrt-passwall2" "main" "pkg"
 UPDATE_PACKAGE "luci-app-tailscale" "asvow/luci-app-tailscale" "main"
-# UPDATE_PACKAGE "athena-led" "unraveloop/JDC-AX6600-Athena-LED-Controller" "main"
 
 UPDATE_PACKAGE "ddns-go" "sirpdboy/luci-app-ddns-go" "main"
 UPDATE_PACKAGE "diskman" "sbwml/luci-app-diskman" "main"
 UPDATE_PACKAGE "diskmanager" "4IceG/luci-app-mini-diskmanager" "main"
 UPDATE_PACKAGE "easytier" "EasyTier/luci-app-easytier" "main"
-UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "" "v2dat"
+
+# 已移除 mosdns
+# UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "" "v2dat"
 
 # Lucky：仓库克隆到 package/lucky，内含 lucky 与 luci-app-lucky
 UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luci-i18n-lucky"
 
 # Daed：仓库克隆到 package/dae，内含 daed 与 luci-app-daed
-# 注意：UPDATE_PACKAGE 函数已修复短名称模糊删除问题，不会再误删 libdaemon
 UPDATE_PACKAGE "dae" "QiuSimons/luci-app-daed" "kix" "name" "daed luci-app-daed"
+PATCH_DAED_USER_AGENT
 
 UPDATE_PACKAGE "netspeedtest" "sirpdboy/netspeedtest" "main" "" "homebox ookla-speedtest"
 UPDATE_PACKAGE "netwizard" "sirpdboy/luci-app-netwizard" "main"
@@ -94,7 +123,6 @@ UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-timewo
 UPDATE_PACKAGE "vnt" "lmq8267/luci-app-vnt" "main"
 UPDATE_PACKAGE "luci-app-airoha-npu" "bingoguo93/luci-app-airoha-npu" "main"
 
-# 更新软件包版本
 UPDATE_VERSION() {
   local PKG_NAME=$1
   local PKG_MARK=${2:-false}
@@ -132,10 +160,9 @@ UPDATE_VERSION() {
   done
 }
 
-# UPDATE_VERSION "软件包名" "测试版，true，可选，默认为否"
-UPDATE_VERSION "sing-box"
+# 已去掉 homeproxy，所以这里不要再更新 sing-box，避免它被额外拉起
+# UPDATE_VERSION "sing-box"
 
-# 引入私有扩展脚本
 if [ -f "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh" ]; then
   source "$GITHUB_WORKSPACE/Scripts/PRIVATE.sh"
 fi
