@@ -66,8 +66,7 @@ if [[ "${WRT_CONFIG,,}" == *"wifi"* && "${WRT_CONFIG,,}" == *"no"* ]]; then
 fi
 
 # 修复 Linux 6.18 / arm64 新增 PMU/BRBE 选项导致 CI 非交互 syncconfig 卡住
-# 这些选项直接写入 target/linux/airoha/an7581/config-*，比写 CONFIG_KERNEL_* 到 .config 更稳定，
-# 因为 make defconfig 可能会清理顶层 OpenWrt 不认识的 CONFIG_KERNEL_* 项。
+# 这些选项直接写入 target/linux/airoha/an7581/config-*，比写 CONFIG_KERNEL_* 到 .config 更稳定。
 for KCFG_FILE in ./target/linux/airoha/an7581/config-*; do
   [ -f "$KCFG_FILE" ] || continue
 
@@ -99,6 +98,19 @@ KCFGEOF
 
   echo "Airoha kernel config fixed: $KCFG_FILE"
 done
+
+# 修复 XG-040G-MD 启用 daed/BTF 后 kernel FIT 超过 5120k，导致 bell_xg-040g-md-uImage.itb 不生成
+# bingoguo93/immortalwrt 6.18 里 Bell XG 系列默认 KERNEL_SIZE := 5120k，开启 CONFIG_KERNEL_DEBUG_INFO_BTF 后容易超限。
+AIROHA_IMAGE_MK="./target/linux/airoha/image/an7581.mk"
+
+if [ -f "$AIROHA_IMAGE_MK" ]; then
+  perl -0pi -e '
+    s/(define Device\/bell_xg-(?:040g|140g)-(?:md|tf).*?KERNEL_SIZE := )\d+k/${1}16384k/gs;
+  ' "$AIROHA_IMAGE_MK"
+
+  echo "Bell XG kernel size patched:"
+  grep -A30 -E '^define Device/bell_xg-(040g|140g)-(md|tf)' "$AIROHA_IMAGE_MK" | grep -E 'define Device|KERNEL_SIZE'
+fi
 
 # 高通平台调整
 DTS_PATH="./target/linux/qualcommax/dts/"
