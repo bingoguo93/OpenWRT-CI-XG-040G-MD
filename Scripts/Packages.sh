@@ -68,15 +68,24 @@ import re
 p = Path("./dae/daed/Makefile")
 s = p.read_text()
 
-if "DAE_USER_AGENT_PATCH_BY_CHATGPT" in s:
+if "DAE_USER_AGENT_PATCH_BY_CHATGPT_V2" in s:
     print("Daed User-Agent patch already exists.")
     raise SystemExit(0)
 
 patch_block = r'''
-	# DAE_USER_AGENT_PATCH_BY_CHATGPT
-	# 修复部分订阅服务提示 v2rayN 版本过旧：强制替换 dae-core 订阅请求 User-Agent
-	find $(PKG_BUILD_DIR) -type f -name "*.go" -exec perl -0pi -e 's#req\.Header\.Set\("User-Agent",\s*fmt\.Sprintf\("dae/%v \(like v2rayA/1\.0 WebRequestHelper\) \(like v2rayN/1\.0 WebRequestHelper\)",\s*config\.Version\)\)#req.Header.Set("User-Agent", "v2rayN/7.22.5")#g; s#v2rayN/1\.0#v2rayN/7.22.5#g; s#v2rayA/1\.0#v2rayN/7.22.5#g; s#v2rayN/1\.0 WebRequestHelper#v2rayN/7.22.5#g; s#v2rayA/1\.0 WebRequestHelper#v2rayN/7.22.5#g' {} \;
-	grep -R "v2rayN/7.22.5" $(PKG_BUILD_DIR) || true
+	# DAE_USER_AGENT_PATCH_BY_CHATGPT_V2
+	# 修复部分订阅服务提示 v2rayN 版本过旧：
+	# 只替换 UA 字符串，不替换 req.Header.Set 整句，避免 Go import config 未使用导致编译失败。
+	if [ -d "$(PKG_BUILD_DIR)/dae-core" ]; then \
+		find $(PKG_BUILD_DIR)/dae-core -type f -name "*.go" -exec perl -0pi -e 's#v2rayN/1\.0#v2rayN/7.22.5#g; s#v2rayA/1\.0#v2rayN/7.22.5#g' {} \; ; \
+	else \
+		find $(PKG_BUILD_DIR) -type f -name "*.go" -exec perl -0pi -e 's#v2rayN/1\.0#v2rayN/7.22.5#g; s#v2rayA/1\.0#v2rayN/7.22.5#g' {} \; ; \
+	fi
+	if grep -R "v2rayN/1.0\|v2rayA/1.0" $(PKG_BUILD_DIR)/dae-core 2>/dev/null; then \
+		echo "DAE User-Agent patch failed: old UA still exists"; \
+		exit 1; \
+	fi
+	grep -R "v2rayN/7.22.5" $(PKG_BUILD_DIR)/dae-core 2>/dev/null || true
 '''
 
 m = re.search(r"(define Build/Prepare\n.*?)(\nendef)", s, flags=re.S)
