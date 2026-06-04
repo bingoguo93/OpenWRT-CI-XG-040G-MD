@@ -10,7 +10,7 @@ name: Build XG-040G-MD LiBwrt
       lan_ip:
         description: "Default LAN IP"
         required: true
-        default: "192.168.1.1"
+        default: "192.168.10.1"
 
 env:
   REPO_URL: "https://github.com/LiBwrt/openwrt-6.x.git"
