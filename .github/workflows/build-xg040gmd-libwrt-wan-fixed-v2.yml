@@ -1,0 +1,441 @@
+name: Build XG-040G-MD LiBwrt
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "LiBwrt branch"
+        required: true
+        default: "main-nss"
+      lan_ip:
+        description: "Default LAN IP"
+        required: true
+        default: "192.168.1.1"
+      wan_port:
+        description: "WAN port: lan2/lan3/lan4; eth1 2.5G is fixed as LAN"
+        required: true
+        default: "lan2"
+
+env:
+  REPO_URL: "https://github.com/LiBwrt/openwrt-6.x.git"
+  REPO_DIR: "openwrt"
+  DEVICE_PROFILE: "bell_xg-040g-md"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker rmi $(docker images -q) 2>/dev/null || true
+          df -h
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          
+          sudo apt-get update -y
+          sudo apt-get full-upgrade -y
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+            build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler \
+            fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged \
+            help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+            libreadline-dev libssl-dev libtool llvm lrzsz msmtp nano ninja-build \
+            nodejs npm p7zip p7zip-full patch pkgconf python3 python3-pip \
+            python3-setuptools libpython3-dev qemu-utils rsync scons squashfs-tools \
+            subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd \
+            zlib1g-dev file time dos2unix
+          sudo npm install -g pnpm
+
+      - name: Clone LiBwrt source
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          BRANCH="${{ inputs.source_branch }}"
+          if [ "$BRANCH" = "main" ]; then
+            echo "LiBwrt/openwrt-6.x 没有 main 分支，自动改用 main-nss"
+            BRANCH="main-nss"
+          fi
+          
+          git clone --depth=1 --single-branch -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
+
+      - name: Add XG-040G-MD device support, set 2.5G as LAN and keep WAN
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          WAN_PORT="${{ inputs.wan_port }}"
+          case "$WAN_PORT" in
+            lan2|lan3|lan4) ;;
+            *) echo "Invalid wan_port: $WAN_PORT. Use lan2, lan3 or lan4."; exit 1 ;;
+          esac
+          
+          LAN_PORTS="eth1"
+          for p in lan2 lan3 lan4; do
+            if [ "$p" != "$WAN_PORT" ]; then
+              LAN_PORTS="$LAN_PORTS $p"
+            fi
+          done
+          
+          mkdir -p target/linux/airoha/dts
+          mkdir -p target/linux/airoha/image
+          mkdir -p target/linux/airoha/an7581/base-files/etc/board.d
+          
+          IMAGE_MK="target/linux/airoha/image/an7581.mk"
+          DTS_FILE="target/linux/airoha/dts/an7581-bell_xg-040g-md.dts"
+          NETWORK_FILE="target/linux/airoha/an7581/base-files/etc/board.d/02_network"
+          
+          [ -f "$IMAGE_MK" ] || touch "$IMAGE_MK"
+          
+          if [ ! -f "$DTS_FILE" ]; then
+            curl -fL \
+              -o "$DTS_FILE" \
+              "https://raw.githubusercontent.com/xiangtailiang/openwrt/main/target/linux/airoha/dts/an7581-bell_xg-040g-md.dts"
+          fi
+          
+          if ! grep -q "define Device/bell_xg-040g-md" "$IMAGE_MK"; then
+            cat >> "$IMAGE_MK" <<'EOF'
+          
+          define Device/bell_xg-040g-md
+            $(call Device/FitImageLzma)
+            DEVICE_VENDOR := Nokia
+            DEVICE_MODEL := Bell XG-040G-MD
+            DEVICE_DTS := an7581-bell_xg-040g-md
+            SOC := an7581
+            KERNEL_LOADADDR := 0x80088000
+            BLOCKSIZE := 128k
+            PAGESIZE := 2048
+            KERNEL_SIZE := 8192k
+            IMAGE_SIZE := 261120k
+            KERNEL_IN_UBI := 1
+            UBINIZE_OPTS := -s 2048
+            IMAGES := factory.bin sysupgrade.bin
+            IMAGE/factory.bin := append-kernel | pad-to $(KERNEL_SIZE) | append-ubi
+            IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+            DEVICE_PACKAGES := airoha-en7581-npu-firmware kmod-phy-airoha-en8811h \
+              kmod-i2c-an7581 kmod-leds-gpio kmod-gpio-button-hotplug \
+              uboot-envtools ubi-utils kmod-usb-storage-uas kmod-usb-net-cdc-ether \
+              kmod-fs-vfat kmod-fs-exfat kmod-fs-ext4 kmod-fs-ntfs3 blkid lsblk
+          endef
+          TARGET_DEVICES += bell_xg-040g-md
+          EOF
+          fi
+          
+          cat > "$NETWORK_FILE" <<EOF
+          #!/bin/sh
+          
+          . /lib/functions/uci-defaults.sh
+          . /lib/functions/system.sh
+          
+          board_config_update
+          
+          case "\$(board_name)" in
+          bell,xg-040g-md)
+          	ucidef_set_interfaces_lan_wan "$LAN_PORTS" "$WAN_PORT"
+          	;;
+          *)
+          	echo "Unsupported hardware. Network interfaces not initialized"
+          	;;
+          esac
+          
+          board_config_flush
+          exit 0
+          EOF
+          
+          chmod +x "$NETWORK_FILE"
+          echo "XG-040G-MD network default: LAN=$LAN_PORTS, WAN=$WAN_PORT"
+
+      - name: Update feeds
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Add custom packages
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          rm -rf package/lucky
+          rm -rf package/luci-app-gecoosac
+          rm -rf package/luci-theme-aurora
+          rm -rf package/luci-app-aurora-config
+          rm -rf package/dae
+          
+          git clone --depth=1 "https://github.com/gdy666/luci-app-lucky.git" package/lucky
+          git clone --depth=1 "https://github.com/laipeng668/luci-app-gecoosac.git" package/luci-app-gecoosac
+          git clone --depth=1 "https://github.com/eamonxg/luci-theme-aurora.git" package/luci-theme-aurora
+          git clone --depth=1 "https://github.com/eamonxg/luci-app-aurora-config.git" package/luci-app-aurora-config
+          
+          git clone --depth=1 -b kix "https://github.com/QiuSimons/luci-app-daed.git" package/dae || \
+          git clone --depth=1 "https://github.com/QiuSimons/luci-app-daed.git" package/dae
+
+      - name: Create default first-boot settings
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          mkdir -p files/etc/uci-defaults
+          
+          cat > files/etc/uci-defaults/99-xg040gmd-defaults <<'EOF'
+          #!/bin/sh
+          
+          BOARD_NAME="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+          [ "$BOARD_NAME" = "bell,xg-040g-md" ] || exit 0
+          
+          LAN_IP="__LAN_IP__"
+          WAN_PORT="__WAN_PORT__"
+          
+          case "$WAN_PORT" in
+            lan2|lan3|lan4) ;;
+            *) WAN_PORT="lan2" ;;
+          esac
+          
+          LAN_PORTS="eth1"
+          for p in lan2 lan3 lan4; do
+            [ "$p" = "$WAN_PORT" ] || LAN_PORTS="$LAN_PORTS $p"
+          done
+          
+          # 默认 LuCI 语言：简体中文；默认主题：Aurora
+          uci -q batch <<EOT
+          set luci.main.lang='zh_cn'
+          set luci.main.mediaurlbase='/luci-static/aurora'
+          set luci.languages.zh_cn='简体中文'
+          set luci.languages.en='English'
+          commit luci
+          EOT
+          
+          # eth1 是 2.5G 口，固定作为 LAN；WAN 默认使用 lan2，可在 Actions 的 wan_port 改为 lan3/lan4。
+          uci -q batch <<EOT
+          delete network.wan
+          delete network.wan6
+          
+          set network.br_lan='device'
+          set network.br_lan.name='br-lan'
+          set network.br_lan.type='bridge'
+          delete network.br_lan.ports
+          
+          set network.lan='interface'
+          set network.lan.device='br-lan'
+          set network.lan.proto='static'
+          set network.lan.ipaddr='$LAN_IP'
+          set network.lan.netmask='255.255.255.0'
+          set network.lan.ip6assign='60'
+          
+          set network.wan='interface'
+          set network.wan.device='$WAN_PORT'
+          set network.wan.proto='dhcp'
+          
+          set network.wan6='interface'
+          set network.wan6.device='@wan'
+          set network.wan6.proto='dhcpv6'
+          
+          commit network
+          EOT
+          
+          for p in $LAN_PORTS; do
+            uci add_list network.br_lan.ports="$p"
+          done
+          uci commit network
+          
+          # 重建最小默认防火墙，确保 WAN 能 NAT 上网。
+          while uci -q delete firewall.@zone[0]; do :; done
+          while uci -q delete firewall.@forwarding[0]; do :; done
+          uci -q batch <<EOT
+          add firewall zone
+          set firewall.@zone[-1].name='lan'
+          add_list firewall.@zone[-1].network='lan'
+          set firewall.@zone[-1].input='ACCEPT'
+          set firewall.@zone[-1].output='ACCEPT'
+          set firewall.@zone[-1].forward='ACCEPT'
+          
+          add firewall zone
+          set firewall.@zone[-1].name='wan'
+          add_list firewall.@zone[-1].network='wan'
+          add_list firewall.@zone[-1].network='wan6'
+          set firewall.@zone[-1].input='REJECT'
+          set firewall.@zone[-1].output='ACCEPT'
+          set firewall.@zone[-1].forward='REJECT'
+          set firewall.@zone[-1].masq='1'
+          set firewall.@zone[-1].mtu_fix='1'
+          
+          add firewall forwarding
+          set firewall.@forwarding[-1].src='lan'
+          set firewall.@forwarding[-1].dest='wan'
+          commit firewall
+          EOT
+          
+          [ -x /etc/init.d/zram ] && /etc/init.d/zram enable
+          [ -x /etc/init.d/daed ] && /etc/init.d/daed enable
+          
+          rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+          
+          exit 0
+          EOF
+          
+          sed -i "s/__LAN_IP__/${{ inputs.lan_ip }}/g" files/etc/uci-defaults/99-xg040gmd-defaults
+          sed -i "s/__WAN_PORT__/${{ inputs.wan_port }}/g" files/etc/uci-defaults/99-xg040gmd-defaults
+          chmod +x files/etc/uci-defaults/99-xg040gmd-defaults
+
+      - name: Generate .config
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          cat > .config <<'EOF'
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y
+          
+          CONFIG_DEVEL=y
+          CONFIG_KERNEL_DEBUG_INFO=y
+          # CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+          CONFIG_KERNEL_DEBUG_INFO_BTF=y
+          CONFIG_KERNEL_CGROUPS=y
+          CONFIG_KERNEL_CGROUP_BPF=y
+          CONFIG_KERNEL_BPF_EVENTS=y
+          CONFIG_BPF_TOOLCHAIN_HOST=y
+          CONFIG_KERNEL_XDP_SOCKETS=y
+          CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
+          CONFIG_DAED_USE_KERNEL_BTF=y
+          # CONFIG_DAED_USE_VMLINUX_BTF is not set
+          
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-ssl=y
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_nftables-json=y
+          
+          CONFIG_LUCI_LANG_zh_Hans=y
+          # CONFIG_LUCI_LANG_zh_Hant is not set
+          
+          CONFIG_PACKAGE_luci-mod-admin-full=y
+          CONFIG_PACKAGE_luci-mod-network=y
+          CONFIG_PACKAGE_luci-mod-status=y
+          CONFIG_PACKAGE_luci-mod-system=y
+          
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+          
+          CONFIG_PACKAGE_luci-theme-aurora=y
+          CONFIG_PACKAGE_luci-app-aurora-config=y
+          
+          CONFIG_PACKAGE_lucky=y
+          CONFIG_PACKAGE_luci-app-lucky=y
+          CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
+          
+          CONFIG_PACKAGE_dae=y
+          CONFIG_PACKAGE_daed=y
+          CONFIG_PACKAGE_luci-app-daed=y
+          CONFIG_PACKAGE_luci-i18n-daed-zh-cn=y
+          CONFIG_PACKAGE_kmod-sched-core=y
+          CONFIG_PACKAGE_kmod-sched-bpf=y
+          CONFIG_PACKAGE_kmod-veth=y
+          CONFIG_PACKAGE_v2ray-geoip=y
+          CONFIG_PACKAGE_v2ray-geosite=y
+          CONFIG_PACKAGE_zoneinfo-asia=y
+          
+          CONFIG_PACKAGE_microsocks=y
+          CONFIG_PACKAGE_luci-app-microsocks=y
+          CONFIG_PACKAGE_luci-i18n-microsocks-zh-cn=y
+          
+          CONFIG_PACKAGE_gecoosac=y
+          CONFIG_PACKAGE_luci-app-gecoosac=y
+          
+          CONFIG_PACKAGE_zram-swap=y
+          CONFIG_PACKAGE_kmod-zram=y
+          
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_htop=y
+          CONFIG_PACKAGE_nano=y
+          CONFIG_PACKAGE_openssh-sftp-server=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb-storage-uas=y
+          CONFIG_PACKAGE_kmod-fs-exfat=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-ntfs3=y
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_blkid=y
+          CONFIG_PACKAGE_lsblk=y
+          
+          CONFIG_PACKAGE_uboot-envtools=y
+          CONFIG_PACKAGE_ubi-utils=y
+          EOF
+          
+          make defconfig
+          
+          echo "===== Selected target ====="
+          grep -E "CONFIG_TARGET_airoha|bell_xg|bell-xg|xg-040" .config || true
+          
+          echo "===== Check Chinese LuCI packages ====="
+          grep -E "CONFIG_LUCI_LANG_zh_Hans|CONFIG_PACKAGE_luci-i18n-base-zh-cn|CONFIG_PACKAGE_luci-i18n-firewall-zh-cn|CONFIG_PACKAGE_luci-i18n-opkg-zh-cn" .config || true
+          
+          echo "===== Check daed packages ====="
+          grep -E "CONFIG_PACKAGE_dae|CONFIG_PACKAGE_daed|CONFIG_PACKAGE_luci-app-daed|CONFIG_DAED_USE_KERNEL_BTF|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_KERNEL_XDP_SOCKETS" .config || true
+          
+          grep -q "^CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y" .config
+          grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config
+          grep -q "^CONFIG_PACKAGE_luci-app-daed=y" .config
+          
+          if ! grep -q "^CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" .config; then
+            echo "WARNING: luci-i18n-base-zh-cn was not selected directly after defconfig."
+            echo "CONFIG_LUCI_LANG_zh_Hans=y is enabled, so LuCI zh-cn translation packages should be selected through LuCI language defaults during package resolution."
+          fi
+
+      - name: Download package sources
+        working-directory: openwrt
+        shell: bash
+        run: |
+          make download -j"$(nproc)" || make download -j1 V=s
+
+      - name: Build firmware
+        working-directory: openwrt
+        shell: bash
+        run: |
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Prepare artifacts
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          mkdir -p ../artifact
+          cp -vf bin/targets/airoha/an7581/*xg-040g-md* ../artifact/ 2>/dev/null || true
+          cp -vf bin/targets/airoha/an7581/sha256sums ../artifact/ 2>/dev/null || true
+          find ../artifact -maxdepth 1 -type f -print
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG-040G-MD-LiBwrt
+          path: artifact/*
