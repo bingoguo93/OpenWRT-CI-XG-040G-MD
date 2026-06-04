@@ -14,7 +14,7 @@ name: Build XG-040G-MD LiBwrt
       wan_port:
         description: "WAN port: lan2/lan3/lan4; eth1 2.5G is fixed as LAN"
         required: true
-        default: "lan2"
+        default: "lan4"
 
 env:
   REPO_URL: "https://github.com/LiBwrt/openwrt-6.x.git"
