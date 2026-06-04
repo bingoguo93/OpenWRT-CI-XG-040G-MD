@@ -1,0 +1,319 @@
+name: Build XG-040G-MD LiBwrt
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "LiBwrt branch"
+        required: true
+        default: "main-nss"
+      lan_ip:
+        description: "Default LAN IP"
+        required: true
+        default: "192.168.1.1"
+
+env:
+  REPO_URL: https://github.com/LiBwrt/openwrt-6.x.git
+  REPO_DIR: openwrt
+  DEVICE_PROFILE: bell_xg-040g-md
+  TARGET_DIR: airoha/an7581
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker rmi $(docker images -q) 2>/dev/null || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get full-upgrade -y
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+            build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler \
+            fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged \
+            help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+            libreadline-dev libssl-dev libtool lrzsz msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python3 python3-pip python3-setuptools \
+            libpython3-dev qemu-utils rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev file time
+
+      - name: Clone LiBwrt source
+        run: |
+          git clone --depth=1 --single-branch -b "${{ inputs.source_branch }}" "$REPO_URL" "$REPO_DIR"
+
+      - name: Add XG-040G-MD device support and set 2.5G as LAN
+        working-directory: openwrt
+        run: |
+          set -eux
+
+          mkdir -p target/linux/airoha/dts
+          mkdir -p target/linux/airoha/image
+          mkdir -p target/linux/airoha/an7581/base-files/etc/board.d
+
+          IMAGE_MK="target/linux/airoha/image/an7581.mk"
+          DTS_FILE="target/linux/airoha/dts/an7581-bell_xg-040g-md.dts"
+          NETWORK_FILE="target/linux/airoha/an7581/base-files/etc/board.d/02_network"
+
+          if [ ! -f "$DTS_FILE" ]; then
+            curl -fL \
+              -o "$DTS_FILE" \
+              https://raw.githubusercontent.com/xiangtailiang/openwrt/main/target/linux/airoha/dts/an7581-bell_xg-040g-md.dts
+          fi
+
+          if ! grep -q "define Device/bell_xg-040g-md" "$IMAGE_MK"; then
+            cat >> "$IMAGE_MK" <<'EOF'
+
+define Device/bell_xg-040g-md
+  $(call Device/FitImageLzma)
+  DEVICE_VENDOR := Nokia
+  DEVICE_MODEL := Bell XG-040G-MD
+  DEVICE_DTS := an7581-bell_xg-040g-md
+  SOC := an7581
+  KERNEL_LOADADDR := 0x80088000
+  BLOCKSIZE := 128k
+  PAGESIZE := 2048
+  KERNEL_SIZE := 8192k
+  IMAGE_SIZE := 261120k
+  KERNEL_IN_UBI := 1
+  UBINIZE_OPTS := -s 2048
+  IMAGES := factory.bin sysupgrade.bin
+  IMAGE/factory.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | append-ubi
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+  DEVICE_PACKAGES := airoha-en7581-npu-firmware kmod-phy-airoha-en8811h \
+    kmod-i2c-an7581 kmod-leds-gpio kmod-gpio-button-hotplug \
+    uboot-envtools ubi-utils kmod-usb-storage-uas kmod-usb-net-cdc-ether \
+    kmod-fs-vfat kmod-fs-exfat kmod-fs-ext4 kmod-fs-ntfs3 blkid lsblk
+endef
+TARGET_DEVICES += bell_xg-040g-md
+EOF
+          fi
+
+          if [ ! -f "$NETWORK_FILE" ]; then
+            cat > "$NETWORK_FILE" <<'EOF'
+#!/bin/sh
+
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+board_config_update
+
+case "$(board_name)" in
+bell,xg-040g-md)
+	ucidef_set_interface_lan "eth1 lan2 lan3 lan4"
+	;;
+*)
+	echo "Unsupported hardware. Network interfaces not initialized"
+	;;
+esac
+
+board_config_flush
+exit 0
+EOF
+          else
+            python3 <<'PY'
+from pathlib import Path
+import re
+
+p = Path("target/linux/airoha/an7581/base-files/etc/board.d/02_network")
+s = p.read_text()
+
+case = '''\tbell,xg-040g-md)
+\t\tucidef_set_interface_lan "eth1 lan2 lan3 lan4"
+\t\t;;
+'''
+
+pattern = r'\n[ \t]*bell,xg-040g-md\)\n.*?\n[ \t]*;;\n'
+
+if re.search(pattern, s, flags=re.S):
+    s = re.sub(pattern, "\n" + case, s, flags=re.S)
+else:
+    inserted = False
+    for marker in ["\tgemtek,w1700k-ubi)", "gemtek,w1700k-ubi)", "\t*)", "*)"]:
+        if marker in s:
+            s = s.replace(marker, case + marker, 1)
+            inserted = True
+            break
+    if not inserted:
+        raise SystemExit("Cannot patch 02_network: no insertion marker found")
+
+p.write_text(s)
+PY
+          fi
+
+          chmod +x "$NETWORK_FILE"
+
+      - name: Update feeds
+        working-directory: openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Add custom packages
+        working-directory: openwrt
+        run: |
+          set -eux
+
+          rm -rf package/lucky
+          rm -rf package/luci-app-gecoosac
+          rm -rf package/luci-theme-aurora
+          rm -rf package/luci-app-aurora-config
+
+          git clone --depth=1 https://github.com/gdy666/luci-app-lucky.git package/lucky
+          git clone --depth=1 https://github.com/laipeng668/luci-app-gecoosac.git package/luci-app-gecoosac
+          git clone --depth=1 https://github.com/eamonxg/luci-theme-aurora.git package/luci-theme-aurora
+          git clone --depth=1 https://github.com/eamonxg/luci-app-aurora-config.git package/luci-app-aurora-config
+
+      - name: Create default first-boot settings
+        working-directory: openwrt
+        run: |
+          set -eux
+
+          mkdir -p files/etc/uci-defaults
+
+          cat > files/etc/uci-defaults/99-xg040gmd-defaults <<EOF
+#!/bin/sh
+
+BOARD_NAME="\$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+[ "\$BOARD_NAME" = "bell,xg-040g-md" ] || exit 0
+
+LAN_IP="${{ inputs.lan_ip }}"
+
+# 默认主题：Aurora
+uci -q batch <<EOT
+set luci.main.mediaurlbase='/luci-static/aurora'
+commit luci
+EOT
+
+# 2.5G 口 eth1 默认作为 LAN，lan2/lan3/lan4 也加入 br-lan
+# 不创建 WAN；如果你要 lan2 当 WAN，看下面说明改这个文件即可。
+uci -q batch <<EOT
+delete network.wan
+delete network.wan6
+
+set network.br_lan='device'
+set network.br_lan.name='br-lan'
+set network.br_lan.type='bridge'
+delete network.br_lan.ports
+add_list network.br_lan.ports='eth1'
+add_list network.br_lan.ports='lan2'
+add_list network.br_lan.ports='lan3'
+add_list network.br_lan.ports='lan4'
+
+set network.lan='interface'
+set network.lan.device='br-lan'
+set network.lan.proto='static'
+set network.lan.ipaddr='\$LAN_IP'
+set network.lan.netmask='255.255.255.0'
+set network.lan.ip6assign='60'
+
+commit network
+EOT
+
+# 启用 zram
+[ -x /etc/init.d/zram ] && /etc/init.d/zram enable
+
+exit 0
+EOF
+
+          chmod +x files/etc/uci-defaults/99-xg040gmd-defaults
+
+      - name: Generate .config
+        working-directory: openwrt
+        run: |
+          cat > .config <<'EOF'
+CONFIG_TARGET_airoha=y
+CONFIG_TARGET_airoha_an7581=y
+CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y
+
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-ssl=y
+CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+
+CONFIG_PACKAGE_luci-theme-aurora=y
+CONFIG_PACKAGE_luci-app-aurora-config=y
+
+CONFIG_PACKAGE_lucky=y
+CONFIG_PACKAGE_luci-app-lucky=y
+CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
+
+CONFIG_PACKAGE_daed=y
+CONFIG_PACKAGE_daed-geoip=y
+CONFIG_PACKAGE_daed-geosite=y
+CONFIG_PACKAGE_luci-app-daed=y
+CONFIG_PACKAGE_luci-i18n-daed-zh-cn=y
+
+CONFIG_PACKAGE_microsocks=y
+CONFIG_PACKAGE_luci-app-microsocks=y
+CONFIG_PACKAGE_luci-i18n-microsocks-zh-cn=y
+
+CONFIG_PACKAGE_gecoosac=y
+CONFIG_PACKAGE_luci-app-gecoosac=y
+
+CONFIG_PACKAGE_zram-swap=y
+CONFIG_PACKAGE_kmod-zram=y
+
+CONFIG_PACKAGE_ca-bundle=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_htop=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_openssh-sftp-server=y
+CONFIG_PACKAGE_luci-app-ttyd=y
+
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-storage-uas=y
+CONFIG_PACKAGE_kmod-fs-exfat=y
+CONFIG_PACKAGE_kmod-fs-ext4=y
+CONFIG_PACKAGE_kmod-fs-ntfs3=y
+CONFIG_PACKAGE_block-mount=y
+CONFIG_PACKAGE_blkid=y
+CONFIG_PACKAGE_lsblk=y
+
+CONFIG_PACKAGE_uboot-envtools=y
+CONFIG_PACKAGE_ubi-utils=y
+EOF
+
+          make defconfig
+
+          echo "===== Selected target ====="
+          grep -E "CONFIG_TARGET_airoha|bell_xg|bell-xg|xg-040" .config || true
+
+          grep -q "CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y" .config
+
+      - name: Download package sources
+        working-directory: openwrt
+        run: |
+          make download -j$(nproc) || make download -j1 V=s
+
+      - name: Build firmware
+        working-directory: openwrt
+        run: |
+          make -j$(nproc) || make -j1 V=s
+
+      - name: Prepare artifacts
+        working-directory: openwrt
+        run: |
+          mkdir -p ../artifact
+          cp -vf bin/targets/airoha/an7581/*xg-040g-md* ../artifact/ 2>/dev/null || true
+          cp -vf bin/targets/airoha/an7581/sha256sums ../artifact/ 2>/dev/null || true
+          find ../artifact -maxdepth 1 -type f -print
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG-040G-MD-LiBwrt
+          path: artifact/*
