@@ -1,68 +1,119 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-#CI项目
+# CI项目
 name: AIR-ALL
 
-#CI计划
+# CI计划
 on:
-  #自动编译：当Auto-Clean运行完成后
+  # 自动编译：当 Auto-Clean 运行完成后
   workflow_run:
     workflows: ["Auto-Clean"]
     types:
       - completed
-  #手动编译
+
+  # 手动编译
   workflow_dispatch:
     inputs:
-      PACKAGE:
-        description: '手动调整插件包，多个请用\n符号隔开。'
-        required: false
-        type: string
       TEST:
         description: '仅输出配置文件，不编译固件。'
         default: 'false'
         required: false
         type: boolean
 
-#CI权限
+# CI权限
 permissions: write-all
 
-#CI任务
+# CI任务
 jobs:
   config:
     name: ${{matrix.CONFIG}}
     strategy:
       fail-fast: false
-      #max-parallel: 3
+      # max-parallel: 3
       matrix:
         CONFIG: [AIROHA-WIFI-NO]
         SOURCE: [bingoguo93/immortalwrt]
         BRANCH: [6.18]
 
-    #调用公用编译核心WRT-CORE.yml
+    # 调用公用编译核心 WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
     with:
-      #编译配置
+      # 编译配置
       WRT_CONFIG: ${{matrix.CONFIG}}
-      #默认主题
+
+      # 默认主题
       WRT_THEME: aurora
-      #默认主机名
+
+      # 默认主机名
       WRT_NAME: OWRT
-      #默认WIFI名称
+
+      # 默认 WIFI 名称
       WRT_SSID: OWRT
-      #默认WIFI密码
+
+      # 默认 WIFI 密码
       WRT_WORD: 12345678
-      #默认地址
+
+      # 默认地址
       WRT_IP: 192.168.1.1
-      #默认密码，仅作提示，修改无用
+
+      # 默认密码，仅作提示，修改无用
       WRT_PW: 无
-      #源码链接
+
+      # 源码链接
       WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
-      #源码分支
+
+      # 源码分支
       WRT_BRANCH: ${{matrix.BRANCH}}
-      #源码名称
+
+      # 源码名称
       WRT_SOURCE: ${{matrix.SOURCE}}
-      #插件调整
-      WRT_PACKAGE: ${{inputs.PACKAGE}}
-      #仅输出配置文件
+
+      # 插件调整：固定为 passwall、mosdns、lucky、microsocks、gecoosac、luci-app-store
+      WRT_PACKAGE: |
+        CONFIG_PACKAGE_luci-app-passwall=y
+        CONFIG_PACKAGE_xray-core=y
+        CONFIG_PACKAGE_chinadns-ng=y
+        CONFIG_PACKAGE_dns2socks=y
+        CONFIG_PACKAGE_ipt2socks=y
+        CONFIG_PACKAGE_tcping=y
+
+        CONFIG_PACKAGE_luci-app-mosdns=y
+        CONFIG_PACKAGE_luci-i18n-mosdns-zh-cn=y
+        CONFIG_PACKAGE_mosdns=y
+        CONFIG_PACKAGE_v2dat=y
+        CONFIG_PACKAGE_v2ray-geodata=y
+        CONFIG_PACKAGE_v2ray-geoip=y
+        CONFIG_PACKAGE_v2ray-geosite=y
+
+        CONFIG_PACKAGE_lucky=y
+        CONFIG_PACKAGE_luci-app-lucky=y
+        CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
+
+        CONFIG_PACKAGE_microsocks=y
+        CONFIG_PACKAGE_luci-app-microsocks=y
+
+        CONFIG_PACKAGE_luci-app-gecoosac=y
+
+        CONFIG_PACKAGE_luci-app-store=y
+        CONFIG_PACKAGE_luci-lib-taskd=y
+
+        CONFIG_PACKAGE_luci-app-daed=n
+        CONFIG_PACKAGE_daed=n
+        CONFIG_PACKAGE_luci-app-openclash=n
+        CONFIG_PACKAGE_luci-app-passwall2=n
+        CONFIG_PACKAGE_luci-app-nikki=n
+        CONFIG_PACKAGE_luci-app-momo=n
+        CONFIG_PACKAGE_luci-app-homeproxy=n
+        CONFIG_PACKAGE_homeproxy=n
+        CONFIG_PACKAGE_sing-box=n
+        CONFIG_PACKAGE_luci-app-samba4=n
+        CONFIG_PACKAGE_luci-app-upnp=n
+        CONFIG_PACKAGE_luci-app-wolplus=n
+        CONFIG_PACKAGE_luci-app-mini-diskmanager=n
+        CONFIG_PACKAGE_luci-app-partexp=n
+        CONFIG_PACKAGE_luci-app-qbittorrent=n
+        CONFIG_PACKAGE_luci-app-openlist2=n
+
+      # 仅输出配置文件
       WRT_TEST: ${{inputs.TEST}}
