@@ -71,6 +71,57 @@ UPDATE_PACKAGE() {
   fi
 }
 
+# 修复 luci-app-store 在 APK 打包模式下的版本号错误
+PATCH_ISTORE_APK_VERSION() {
+  local STORE_MAKEFILE="./luci-app-store/Makefile"
+
+  if [ ! -f "$STORE_MAKEFILE" ]; then
+    echo "luci-app-store Makefile not found, skip iStore APK version patch."
+    return 1
+  fi
+
+  echo " "
+  echo "=============================="
+  echo "Patch luci-app-store APK version"
+  echo "=============================="
+
+  python3 <<'PY'
+from pathlib import Path
+import re
+
+p = Path("./luci-app-store/Makefile")
+s = p.read_text()
+
+old = s
+
+# APK 不接受 PKG_VERSION:=0.1.32-1 这种格式；
+# 改成 PKG_VERSION:=0.1.32，PKG_RELEASE:=1，
+# 最终 apk 打包时会生成类似 0.1.32-r1 的合法版本。
+s = re.sub(r'PKG_VERSION:=[^\s#]+', 'PKG_VERSION:=0.1.32', s, count=1)
+
+# 兼容正常多行 Makefile
+s = re.sub(r'(?m)^PKG_RELEASE:=\s*$', 'PKG_RELEASE:=1', s, count=1)
+
+# 兼容上游 Makefile 被压成一行时的情况
+s = s.replace('PKG_RELEASE:= ISTORE_UI_VERSION', 'PKG_RELEASE:=1\nISTORE_UI_VERSION')
+
+# 如果仍然没有修正到 PKG_RELEASE，就兜底替换第一个 PKG_RELEASE:=
+if 'PKG_RELEASE:=1' not in s:
+    s = re.sub(r'PKG_RELEASE:=', 'PKG_RELEASE:=1', s, count=1)
+
+if s != old:
+    p.write_text(s)
+    print("luci-app-store Makefile patched:")
+    print("  PKG_VERSION:=0.1.32")
+    print("  PKG_RELEASE:=1")
+else:
+    print("luci-app-store Makefile unchanged; please check manually.")
+PY
+
+  echo "After patch:"
+  grep -E "PKG_VERSION:=|PKG_RELEASE:=|ISTORE_UI_VERSION:=|ISTORE_UI_RELEASE:=" "$STORE_MAKEFILE" || true
+}
+
 # ============================================================
 # 主题：aurora
 # WRT_THEME=aurora 时，Settings.sh 会写入：
@@ -88,25 +139,24 @@ UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg" "luci
 
 # ============================================================
 # MosDNS
-# 官方建议：
-# git clone https://github.com/sbwml/luci-app-mosdns -b v5 package/mosdns
-# git clone https://github.com/sbwml/v2ray-geodata package/v2ray-geodata
 # ============================================================
 UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "name" "luci-app-mosdns v2dat"
 UPDATE_PACKAGE "v2ray-geodata" "sbwml/v2ray-geodata" "master" "name" "v2ray-geoip v2ray-geosite"
 
 # ============================================================
 # Lucky
-# 仓库内包含 lucky、luci-app-lucky、luci-i18n-lucky
 # ============================================================
 UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luci-i18n-lucky"
 
 # ============================================================
 # luci-app-store / iStore
-# iStore 需要 luci-app-store 与 luci-lib-taskd
+# 这里必须修复 luci-app-store 的 PKG_VERSION，
+# 否则 APK 打包阶段会报：
+# ERROR: info field 'version' has invalid value: package version is invalid
 # ============================================================
 UPDATE_PACKAGE "luci-app-store" "linkease/istore" "main" "pkg" "luci-app-store"
 UPDATE_PACKAGE "luci-lib-taskd" "linkease/istore" "main" "pkg" "luci-lib-taskd"
+PATCH_ISTORE_APK_VERSION
 
 # ============================================================
 # gecoosac
