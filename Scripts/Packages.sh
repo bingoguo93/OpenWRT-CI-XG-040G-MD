@@ -91,7 +91,6 @@ import re
 
 p = Path("./luci-app-store/Makefile")
 s = p.read_text()
-
 old = s
 
 # APK 不接受 PKG_VERSION:=0.1.32-1 这种格式；
@@ -118,8 +117,32 @@ else:
     print("luci-app-store Makefile unchanged; please check manually.")
 PY
 
-  echo "After patch:"
+  echo "After patch luci-app-store:"
   grep -E "PKG_VERSION:=|PKG_RELEASE:=|ISTORE_UI_VERSION:=|ISTORE_UI_RELEASE:=" "$STORE_MAKEFILE" || true
+}
+
+# 检查 iStore 依赖是否完整
+CHECK_ISTORE_DEPS() {
+  echo " "
+  echo "=============================="
+  echo "Check iStore dependencies"
+  echo "=============================="
+
+  local MISSING=0
+
+  for DIR in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
+    if [ -d "./$DIR" ]; then
+      echo "Found: ./$DIR"
+    else
+      echo "Missing: ./$DIR"
+      MISSING=1
+    fi
+  done
+
+  if [ "$MISSING" -ne 0 ]; then
+    echo "iStore dependencies are incomplete."
+    exit 1
+  fi
 }
 
 # ============================================================
@@ -150,13 +173,21 @@ UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luc
 
 # ============================================================
 # luci-app-store / iStore
-# 这里必须修复 luci-app-store 的 PKG_VERSION，
-# 否则 APK 打包阶段会报：
-# ERROR: info field 'version' has invalid value: package version is invalid
+#
+# 注意：
+# iStore 不能只拉 luci-app-store 和 luci-lib-taskd。
+# luci-lib-taskd 还依赖 luci-lib-xterm 和 taskd。
+# 缺少这两个包会在 package/install 阶段报：
+# luci-lib-xterm no such package
+# taskd no such package
 # ============================================================
 UPDATE_PACKAGE "luci-app-store" "linkease/istore" "main" "pkg" "luci-app-store"
 UPDATE_PACKAGE "luci-lib-taskd" "linkease/istore" "main" "pkg" "luci-lib-taskd"
+UPDATE_PACKAGE "luci-lib-xterm" "linkease/istore" "main" "pkg" "luci-lib-xterm"
+UPDATE_PACKAGE "taskd" "linkease/istore" "main" "pkg" "taskd"
+
 PATCH_ISTORE_APK_VERSION
+CHECK_ISTORE_DEPS
 
 # ============================================================
 # gecoosac
