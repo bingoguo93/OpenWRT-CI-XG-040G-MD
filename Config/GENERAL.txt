@@ -1,4 +1,4 @@
-# 增加插件：指定保留 passwall、mosdns、lucky、microsocks、gecoosac、luci-app-store
+# 增加插件：只保留 passwall、mosdns、lucky、microsocks、gecoosac
 
 # 基础 LuCI 插件
 CONFIG_PACKAGE_luci-app-autoreboot=y
@@ -32,10 +32,6 @@ CONFIG_PACKAGE_luci-app-microsocks=y
 # gecoosac
 CONFIG_PACKAGE_luci-app-gecoosac=y
 
-# luci-app-store / iStore
-CONFIG_PACKAGE_luci-app-store=y
-CONFIG_PACKAGE_luci-lib-taskd=y
-
 # Airoha NPU 插件，建议保留
 CONFIG_PACKAGE_luci-app-airoha-npu=y
 
@@ -49,6 +45,11 @@ CONFIG_BUSYBOX_CONFIG_FEATURE_SWAPON_PRI=y
 CONFIG_BUSYBOX_CONFIG_FEATURE_SWAPON_DISCARD=y
 
 # 删除不需要的插件
+CONFIG_PACKAGE_luci-app-store=n
+CONFIG_PACKAGE_luci-lib-taskd=n
+CONFIG_PACKAGE_luci-lib-xterm=n
+CONFIG_PACKAGE_taskd=n
+
 CONFIG_PACKAGE_luci-app-attendedsysupgrade=n
 CONFIG_PACKAGE_luci-app-wol=n
 CONFIG_PACKAGE_luci-app-wolplus=n
