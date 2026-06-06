@@ -71,80 +71,6 @@ UPDATE_PACKAGE() {
   fi
 }
 
-# 修复 luci-app-store 在 APK 打包模式下的版本号错误
-PATCH_ISTORE_APK_VERSION() {
-  local STORE_MAKEFILE="./luci-app-store/Makefile"
-
-  if [ ! -f "$STORE_MAKEFILE" ]; then
-    echo "luci-app-store Makefile not found, skip iStore APK version patch."
-    return 1
-  fi
-
-  echo " "
-  echo "=============================="
-  echo "Patch luci-app-store APK version"
-  echo "=============================="
-
-  python3 <<'PY'
-from pathlib import Path
-import re
-
-p = Path("./luci-app-store/Makefile")
-s = p.read_text()
-old = s
-
-# APK 不接受 PKG_VERSION:=0.1.32-1 这种格式；
-# 改成 PKG_VERSION:=0.1.32，PKG_RELEASE:=1，
-# 最终 apk 打包时会生成类似 0.1.32-r1 的合法版本。
-s = re.sub(r'PKG_VERSION:=[^\s#]+', 'PKG_VERSION:=0.1.32', s, count=1)
-
-# 兼容正常多行 Makefile
-s = re.sub(r'(?m)^PKG_RELEASE:=\s*$', 'PKG_RELEASE:=1', s, count=1)
-
-# 兼容上游 Makefile 被压成一行时的情况
-s = s.replace('PKG_RELEASE:= ISTORE_UI_VERSION', 'PKG_RELEASE:=1\nISTORE_UI_VERSION')
-
-# 如果仍然没有修正到 PKG_RELEASE，就兜底替换第一个 PKG_RELEASE:=
-if 'PKG_RELEASE:=1' not in s:
-    s = re.sub(r'PKG_RELEASE:=', 'PKG_RELEASE:=1', s, count=1)
-
-if s != old:
-    p.write_text(s)
-    print("luci-app-store Makefile patched:")
-    print("  PKG_VERSION:=0.1.32")
-    print("  PKG_RELEASE:=1")
-else:
-    print("luci-app-store Makefile unchanged; please check manually.")
-PY
-
-  echo "After patch luci-app-store:"
-  grep -E "PKG_VERSION:=|PKG_RELEASE:=|ISTORE_UI_VERSION:=|ISTORE_UI_RELEASE:=" "$STORE_MAKEFILE" || true
-}
-
-# 检查 iStore 依赖是否完整
-CHECK_ISTORE_DEPS() {
-  echo " "
-  echo "=============================="
-  echo "Check iStore dependencies"
-  echo "=============================="
-
-  local MISSING=0
-
-  for DIR in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
-    if [ -d "./$DIR" ]; then
-      echo "Found: ./$DIR"
-    else
-      echo "Missing: ./$DIR"
-      MISSING=1
-    fi
-  done
-
-  if [ "$MISSING" -ne 0 ]; then
-    echo "iStore dependencies are incomplete."
-    exit 1
-  fi
-}
-
 # ============================================================
 # 主题：aurora
 # WRT_THEME=aurora 时，Settings.sh 会写入：
@@ -162,6 +88,7 @@ UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg" "luci
 
 # ============================================================
 # MosDNS
+# sbwml/luci-app-mosdns v5 依赖 mosdns、v2dat、v2ray-geoip、v2ray-geosite。
 # ============================================================
 UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "name" "luci-app-mosdns v2dat"
 UPDATE_PACKAGE "v2ray-geodata" "sbwml/v2ray-geodata" "master" "name" "v2ray-geoip v2ray-geosite"
@@ -172,28 +99,10 @@ UPDATE_PACKAGE "v2ray-geodata" "sbwml/v2ray-geodata" "master" "name" "v2ray-geoi
 UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luci-i18n-lucky"
 
 # ============================================================
-# luci-app-store / iStore
-#
-# 注意：
-# iStore 不能只拉 luci-app-store 和 luci-lib-taskd。
-# luci-lib-taskd 还依赖 luci-lib-xterm 和 taskd。
-# 缺少这两个包会在 package/install 阶段报：
-# luci-lib-xterm no such package
-# taskd no such package
+# gecoosac / microsocks LuCI
+# VIKINGYFY/packages 内通常包含 luci-app-gecoosac 等扩展包。
 # ============================================================
-UPDATE_PACKAGE "luci-app-store" "linkease/istore" "main" "pkg" "luci-app-store"
-UPDATE_PACKAGE "luci-lib-taskd" "linkease/istore" "main" "pkg" "luci-lib-taskd"
-UPDATE_PACKAGE "luci-lib-xterm" "linkease/istore" "main" "pkg" "luci-lib-xterm"
-UPDATE_PACKAGE "taskd" "linkease/istore" "main" "pkg" "taskd"
-
-PATCH_ISTORE_APK_VERSION
-CHECK_ISTORE_DEPS
-
-# ============================================================
-# gecoosac
-# VIKINGYFY/packages 内包含 gecoosac
-# ============================================================
-UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-gecoosac"
+UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-gecoosac luci-app-microsocks"
 
 # ============================================================
 # Airoha NPU 插件，原仓库已有，建议保留
