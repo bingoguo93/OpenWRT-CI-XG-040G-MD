@@ -1,4 +1,4 @@
-name: Build XG-040G-MD LiBwrt
+name: Build XG-040G-MD passwall
 
 "on":
   workflow_dispatch:
