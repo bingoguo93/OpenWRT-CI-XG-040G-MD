@@ -50,14 +50,6 @@ jobs:
         CONFIG_PACKAGE_ipt2socks=y
         CONFIG_PACKAGE_tcping=y
 
-        CONFIG_PACKAGE_luci-app-mosdns=y
-        CONFIG_PACKAGE_luci-i18n-mosdns-zh-cn=y
-        CONFIG_PACKAGE_mosdns=y
-        CONFIG_PACKAGE_v2dat=y
-        CONFIG_PACKAGE_v2ray-geodata=y
-        CONFIG_PACKAGE_v2ray-geoip=y
-        CONFIG_PACKAGE_v2ray-geosite=y
-
         CONFIG_PACKAGE_lucky=y
         CONFIG_PACKAGE_luci-app-lucky=y
         CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
@@ -66,6 +58,11 @@ jobs:
         CONFIG_PACKAGE_luci-app-microsocks=y
 
         CONFIG_PACKAGE_luci-app-gecoosac=y
+
+        CONFIG_PACKAGE_luci-app-mosdns=n
+        CONFIG_PACKAGE_luci-i18n-mosdns-zh-cn=n
+        CONFIG_PACKAGE_mosdns=n
+        CONFIG_PACKAGE_v2dat=n
 
         CONFIG_PACKAGE_luci-app-store=n
         CONFIG_PACKAGE_luci-lib-taskd=n
