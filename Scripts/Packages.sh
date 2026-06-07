@@ -83,15 +83,8 @@ UPDATE_PACKAGE "luci-app-aurora-config" "eamonxg/luci-app-aurora-config" "master
 # ============================================================
 # PassWall
 # ============================================================
-UPDATE_PACKAGE "passwall-packages" "Openwrt-Passwall/openwrt-passwall-packages" "main" "" "xray-core chinadns-ng dns2socks ipt2socks tcping microsocks v2ray-geodata v2ray-geoip v2ray-geosite"
+UPDATE_PACKAGE "passwall-packages" "Openwrt-Passwall/openwrt-passwall-packages" "main" "" "xray-core chinadns-ng dns2socks ipt2socks tcping microsocks"
 UPDATE_PACKAGE "passwall" "Openwrt-Passwall/openwrt-passwall" "main" "pkg" "luci-app-passwall"
-
-# ============================================================
-# MosDNS
-# sbwml/luci-app-mosdns v5 依赖 mosdns、v2dat、v2ray-geoip、v2ray-geosite。
-# ============================================================
-UPDATE_PACKAGE "mosdns" "sbwml/luci-app-mosdns" "v5" "name" "luci-app-mosdns v2dat"
-UPDATE_PACKAGE "v2ray-geodata" "sbwml/v2ray-geodata" "master" "name" "v2ray-geoip v2ray-geosite"
 
 # ============================================================
 # Lucky
@@ -100,7 +93,7 @@ UPDATE_PACKAGE "lucky" "gdy666/luci-app-lucky" "main" "name" "luci-app-lucky luc
 
 # ============================================================
 # gecoosac / microsocks LuCI
-# VIKINGYFY/packages 内通常包含 luci-app-gecoosac 等扩展包。
+# VIKINGYFY/packages 内通常包含 luci-app-gecoosac、luci-app-microsocks 等扩展包
 # ============================================================
 UPDATE_PACKAGE "viking" "VIKINGYFY/packages" "main" "" "gecoosac luci-app-gecoosac luci-app-microsocks"
 
