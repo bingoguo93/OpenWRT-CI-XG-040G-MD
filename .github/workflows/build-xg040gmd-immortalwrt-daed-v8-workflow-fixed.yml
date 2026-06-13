@@ -1,0 +1,701 @@
+name: Build XG-040G-MD ImmortalWrt Daed V8 Workflow Fixed
+
+"on":
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: "ImmortalWrt branch"
+        required: true
+        default: "master"
+      lan_ip:
+        description: "Default LAN IP"
+        required: true
+        default: "192.168.1.1"
+      wan_port:
+        description: "WAN port: lan2/lan3/lan4; eth1 2.5G is fixed as LAN"
+        required: true
+        default: "lan2"
+      lucky_core_version:
+        description: "Lucky core version to build"
+        required: true
+        default: "2.27.2"
+
+env:
+  REPO_URL: "https://github.com/immortalwrt/immortalwrt.git"
+  REPO_DIR: "openwrt"
+  DEVICE_PROFILE: "bell_xg-040g-md"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        shell: bash
+        run: |
+          
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker rmi $(docker images -q) 2>/dev/null || true
+          df -h
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          
+          sudo apt-get update -y
+          sudo apt-get full-upgrade -y
+          sudo apt-get install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison \
+            build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler \
+            fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged \
+            help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev \
+            libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev \
+            libreadline-dev libssl-dev libtool llvm lrzsz msmtp nano ninja-build \
+            nodejs npm p7zip p7zip-full patch pkgconf python3 python3-pip \
+            python3-setuptools libpython3-dev qemu-utils rsync scons squashfs-tools \
+            subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd \
+            zlib1g-dev file time dos2unix zstd re2c libyaml-dev libz-dev libgnutls28-dev lld mkisofs python3-ply python3-docutils python3-pyelftools ecj
+          sudo npm install -g pnpm
+
+      - name: Clone ImmortalWrt source
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          BRANCH="${{ inputs.source_branch }}"
+          [ -n "$BRANCH" ] || BRANCH="master"
+          
+          git clone --depth=1 --single-branch -b "$BRANCH" "$REPO_URL" "$REPO_DIR"
+
+      - name: Add XG-040G-MD device support, set 2.5G as LAN and keep WAN
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          WAN_PORT="${{ inputs.wan_port }}"
+          case "$WAN_PORT" in
+            lan2|lan3|lan4) ;;
+            *) echo "Invalid wan_port: $WAN_PORT. Use lan2, lan3 or lan4."; exit 1 ;;
+          esac
+          
+          LAN_PORTS="eth1"
+          for p in lan2 lan3 lan4; do
+            if [ "$p" != "$WAN_PORT" ]; then
+              LAN_PORTS="$LAN_PORTS $p"
+            fi
+          done
+          
+          # 使用 OpenWrt main 的 Airoha target 作为底层来源。
+          # 原 v2 从 LiBwrt 导入的 Airoha 平台与 ImmortalWrt master / Linux 6.18 存在 DTS/驱动错配，
+          # 会导致 airoha_eth 反复报 cannot find device node npu。
+          # 这里直接同步 upstream Airoha target，后面再追加 XG-040G-MD 自定义设备定义。
+          echo "同步 OpenWrt main Airoha target，修复 AN7581 NPU DTS/驱动匹配问题。"
+          rm -rf /tmp/openwrt-airoha
+          git clone --depth=1 --filter=blob:none --sparse --single-branch -b main \
+            "https://github.com/openwrt/openwrt.git" /tmp/openwrt-airoha
+          git -C /tmp/openwrt-airoha sparse-checkout set target/linux/airoha package/firmware/linux-firmware
+          mkdir -p target/linux
+          rm -rf target/linux/airoha
+          cp -a /tmp/openwrt-airoha/target/linux/airoha target/linux/
+          # 同步 Airoha NPU firmware 包定义；如果 ImmortalWrt 本身已有，则覆盖到较新的 upstream 版本。
+          if [ -d /tmp/openwrt-airoha/package/firmware/linux-firmware ]; then
+            mkdir -p package/firmware/linux-firmware
+            cp -af /tmp/openwrt-airoha/package/firmware/linux-firmware/* package/firmware/linux-firmware/
+          fi
+          rm -rf /tmp/openwrt-airoha
+          
+          mkdir -p target/linux/airoha/dts
+          mkdir -p target/linux/airoha/image
+          mkdir -p target/linux/airoha/an7581/base-files/etc/board.d
+          
+          IMAGE_MK="target/linux/airoha/image/an7581.mk"
+          DTS_FILE="target/linux/airoha/dts/an7581-bell_xg-040g-md.dts"
+          NETWORK_FILE="target/linux/airoha/an7581/base-files/etc/board.d/02_network"
+          
+          [ -f "$IMAGE_MK" ] || touch "$IMAGE_MK"
+          
+          if [ ! -f "$DTS_FILE" ]; then
+            curl -fL \
+              -o "$DTS_FILE" \
+              "https://raw.githubusercontent.com/xiangtailiang/openwrt/main/target/linux/airoha/dts/an7581-bell_xg-040g-md.dts"
+          fi
+
+          # 强制校验 AN7581 DTSI 必须包含 upstream NPU 节点和 eth -> npu phandle。
+          # 缺少这些内容时，运行时 airoha_eth 会不断重试并刷屏 cannot find device node npu。
+          DTSI_FILE="target/linux/airoha/dts/an7581.dtsi"
+          if ! grep -q "npu: npu@1e900000" "$DTSI_FILE" || ! grep -q "airoha,npu = <&npu>;" "$DTSI_FILE"; then
+            echo "ERROR: $DTSI_FILE 缺少 AN7581 NPU 节点或 airoha,npu 引用。"
+            echo "当前 Airoha target 与 kernel/driver 不匹配，停止编译，避免生成会刷屏卡死的固件。"
+            exit 1
+          fi
+
+          # v4 稳定优先：不启用 NPU 硬件加速。
+          # 保留 upstream an7581.dtsi 中的 npu phandle，避免 airoha_eth 因找不到 npu 节点刷屏；
+          # 但在设备 DTS 中显式保持 disabled，规避当前 ImmortalWrt master + Airoha NPU 在 PPPoE 场景下的随机重启/卡死。
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("target/linux/airoha/dts/an7581-bell_xg-040g-md.dts")
+          s = p.read_text()
+          s = re.sub(r"\n&npu\s*\{[^}]*\};\s*", "\n", s, flags=re.S)
+          s = s.rstrip() + "\n\n&npu {\n\tstatus = \"disabled\";\n};\n"
+          p.write_text(s)
+          PY
+          
+          if ! grep -q "define Device/bell_xg-040g-md" "$IMAGE_MK"; then
+            cat >> "$IMAGE_MK" <<'EOF'
+          
+          define Device/bell_xg-040g-md
+            $(call Device/FitImageLzma)
+            DEVICE_VENDOR := Nokia
+            DEVICE_MODEL := Bell XG-040G-MD
+            DEVICE_DTS := an7581-bell_xg-040g-md
+            SOC := an7581
+            KERNEL_LOADADDR := 0x80088000
+            BLOCKSIZE := 128k
+            PAGESIZE := 2048
+            KERNEL_SIZE := 8192k
+            IMAGE_SIZE := 261120k
+            KERNEL_IN_UBI := 1
+            UBINIZE_OPTS := -s 2048
+            IMAGES := factory.bin sysupgrade.bin
+            IMAGE/factory.bin := append-kernel | pad-to $$(KERNEL_SIZE) | append-ubi
+            IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+            DEVICE_PACKAGES := -airoha-en7581-npu-firmware kmod-phy-airoha-en8811h \
+              kmod-i2c-an7581 kmod-leds-gpio kmod-gpio-button-hotplug \
+              uboot-envtools ubi-utils kmod-usb-storage-uas kmod-usb-net-cdc-ether \
+              kmod-fs-vfat kmod-fs-exfat kmod-fs-ext4 kmod-fs-ntfs3 blkid lsblk
+          endef
+          TARGET_DEVICES += bell_xg-040g-md
+          EOF
+          fi
+          
+          # OpenWrt image recipe variables inside Device/* must be escaped as $$(...).
+          # Otherwise $(KERNEL_SIZE) is expanded too early and becomes empty, causing: dd: invalid number: ''.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("target/linux/airoha/image/an7581.mk")
+          s = p.read_text()
+          s = s.replace("pad-to $(KERNEL_SIZE)", "pad-to $$(KERNEL_SIZE)")
+          s = s.replace("pad-to $(IMAGE_SIZE)", "pad-to $$(IMAGE_SIZE)")
+          p.write_text(s)
+          PY
+          
+          echo "===== XG-040G-MD image definition ====="
+          awk '/define Device\/bell_xg-040g-md/,/endef/' "$IMAGE_MK" || true
+          
+          cat > "$NETWORK_FILE" <<EOF
+          #!/bin/sh
+          
+          . /lib/functions/uci-defaults.sh
+          . /lib/functions/system.sh
+          
+          board_config_update
+          
+          case "\$(board_name)" in
+          bell,xg-040g-md)
+          	ucidef_set_interfaces_lan_wan "$LAN_PORTS" "$WAN_PORT"
+          	;;
+          *)
+          	echo "Unsupported hardware. Network interfaces not initialized"
+          	;;
+          esac
+          
+          board_config_flush
+          exit 0
+          EOF
+          
+          chmod +x "$NETWORK_FILE"
+          echo "XG-040G-MD network default: LAN=$LAN_PORTS, WAN=$WAN_PORT"
+
+          # ImmortalWrt master may use a newer kernel than the imported Airoha target.
+          # Add explicit ARM64 PMU config answers so CI kernel syncconfig will not stop
+          # at prompts such as: ARM64_BRBE [Y/n/?] (NEW).
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("target/linux/airoha")
+          root.mkdir(parents=True, exist_ok=True)
+
+          # Ensure a config file exists for ImmortalWrt master kernel 6.18.
+          config_618 = root / "config-6.18"
+          if not config_618.exists():
+              existing = sorted(root.glob("config-*"))
+              if existing:
+                  config_618.write_text(existing[-1].read_text())
+              else:
+                  config_618.touch()
+
+          # These are the ARM/ARM64 performance monitor options seen in the failed log.
+          # Keep ARM_PMU enabled, disable optional PMU drivers/features not required for routing.
+          force = {
+              "ARM_CCI_PMU": False,
+              "ARM_CCN": False,
+              "ARM_CMN": False,
+              "ARM_NI": False,
+              "ARM_PMU": True,
+              "ARM_SMMU_V3_PMU": False,
+              "ARM_DSU_PMU": False,
+              "ARM_SPE_PMU": False,
+              "ARM64_BRBE": False,
+              # 当前主路由稳定版不主动启用 Airoha NPU/PPE 加速；如果源码内核存在这些符号，则关闭。
+              "AIROHA_NPU": False,
+              "AIROHA_EN7581_NPU": False,
+              "NET_AIROHA_NPU": False,
+          }
+
+          candidates = {config_618}
+          candidates.update(root.glob("config-*"))
+          candidates.update(root.glob("*/config-*"))
+          candidates.update(root.glob("*/config-default"))
+
+          def set_symbol(text: str, sym: str, enabled: bool) -> str:
+              text = re.sub(rf"^CONFIG_{re.escape(sym)}=.*\n", "", text, flags=re.M)
+              text = re.sub(rf"^# CONFIG_{re.escape(sym)} is not set\n", "", text, flags=re.M)
+              line = f"CONFIG_{sym}=y\n" if enabled else f"# CONFIG_{sym} is not set\n"
+              return text.rstrip() + "\n" + line
+
+          for path in sorted(candidates):
+              if not path.exists() or not path.is_file():
+                  continue
+              text = path.read_text()
+              for sym, enabled in force.items():
+                  text = set_symbol(text, sym, enabled)
+              path.write_text(text)
+              print(f"Patched kernel config: {path}")
+          PY
+
+      - name: Update feeds
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Hardfix elfutils Werror flags and keep NoBTF path
+        working-directory: openwrt
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # v8: 继承 v7 elfutils hardfix，并把 Lucky 默认固定到 2.27.2，
+          # 但 OpenWrt 的 BuildPackage/HostBuild 已经在前面展开，导致 target elfutils 编译命令里仍然出现 -Werror。
+          # 这里把参数插入到 BuildPackage/HostBuild 之前，并且在 prepare 后直接清理 elfutils 生成 Makefile 里的 -Werror。
+          for d in tools/elfutils package/libs/elfutils; do
+            [ -d "$d" ] || continue
+            rm -f "$d/patches/010-fix-xasprintf-format-security.patch" \
+                  "$d/patches/011-elfutils-gcc15-register-array.patch" || true
+            [ -f "$d/Makefile" ] || continue
+            python3 - "$d/Makefile" <<'PYMAKE'
+          from pathlib import Path
+          import sys
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          marker = "# XG040GMD_ELFUTILS_HARDFIX_V7"
+          block = """
+          # XG040GMD_ELFUTILS_HARDFIX_V7
+          HOST_CONFIGURE_ARGS += --disable-werror
+          CONFIGURE_ARGS += --disable-werror
+          HOST_CFLAGS := $(filter-out -Werror -Werror=%,$(HOST_CFLAGS)) -Wno-error -Wno-error=format-security -Wno-error=unterminated-string-initialization -Wno-error=use-after-free
+          TARGET_CFLAGS := $(filter-out -Werror -Werror=%,$(TARGET_CFLAGS)) -Wno-error -Wno-error=format-security -Wno-error=unterminated-string-initialization -Wno-error=use-after-free
+          EXTRA_CFLAGS += -Wno-error -Wno-error=format-security -Wno-error=unterminated-string-initialization -Wno-error=use-after-free
+          MAKE_FLAGS += CFLAGS="$(TARGET_CFLAGS) -Wno-error -Wno-error=format-security -Wno-error=unterminated-string-initialization -Wno-error=use-after-free"
+          HOST_MAKE_FLAGS += CFLAGS="$(HOST_CFLAGS) -Wno-error -Wno-error=format-security -Wno-error=unterminated-string-initialization -Wno-error=use-after-free"
+          """.lstrip()
+          if marker not in s:
+              # 必须放在 $(eval $(call BuildPackage...)) 或 HostBuild 之前，否则变量对构建规则不生效。
+              positions = [x for x in [s.find("$(eval $(call BuildPackage"), s.find("$(eval $(call HostBuild"))] if x != -1]
+              if positions:
+                  i = min(positions)
+                  s = s[:i] + "\n" + block + "\n" + s[i:]
+              else:
+                  s += "\n" + block
+          p.write_text(s)
+          PYMAKE
+          done
+
+          echo "===== elfutils Makefile hardfix inserted before build rules ====="
+          grep -R "XG040GMD_ELFUTILS_HARDFIX_V7" -n tools/elfutils package/libs/elfutils || true
+
+      - name: Prebuild elfutils with Werror removed
+        working-directory: openwrt
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          strip_werror() {
+            local dir="$1"
+            [ -d "$dir" ] || return 0
+            echo "Cleaning -Werror under $dir"
+            find "$dir" -type f \( -name 'Makefile' -o -name 'Makefile.in' -o -name '*.mk' -o -name 'config.status' \) -print0 \
+              | xargs -0 -r sed -i -E 's/(^|[[:space:]])-Werror(=[^[:space:]]+)?/ /g'
+          }
+
+          # host elfutils may be needed by debug/BPF-related tooling.
+          make tools/elfutils/prepare V=s || true
+          strip_werror build_dir/host/elfutils-0.192
+          make tools/elfutils/compile V=s || { echo "tools/elfutils failed"; exit 1; }
+
+          # target elfutils is pulled by daed/dae dependency chain even without kernel BTF.
+          make package/libs/elfutils/prepare V=s || true
+          for d in build_dir/target-*/elfutils-0.192; do strip_werror "$d"; done
+          make package/libs/elfutils/compile V=s || { echo "package/libs/elfutils failed"; exit 1; }
+
+      - name: Add custom packages
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          rm -rf package/lucky
+          rm -rf package/luci-app-gecoosac
+          rm -rf package/luci-theme-aurora
+          rm -rf package/luci-app-aurora-config
+          rm -rf package/dae
+          
+          git clone --depth=1 "https://github.com/gdy666/luci-app-lucky.git" package/lucky
+
+          # 使用指定 Lucky core 版本。gdy666/luci-app-lucky 的 lucky/Makefile 默认会从
+          # https://github.com/gdy666/lucky/releases/download/v$(PKG_VERSION)/ 拉取对应架构二进制。
+          # 目前 3.0.0 / v3 主要在 DockerHub 有镜像标签，GitHub release 没有 luci-app-lucky 需要的 tar.gz 资产；
+          # 所以默认固定到 GitHub release 已确认存在 Linux_arm64 资产的 2.27.2，避免 404。
+          LUCKY_CORE_VERSION="${{ inputs.lucky_core_version }}"
+          [ -n "$LUCKY_CORE_VERSION" ] || LUCKY_CORE_VERSION="2.27.2"
+          LUCKY_ASSET_URL="https://github.com/gdy666/lucky/releases/download/v${LUCKY_CORE_VERSION}/lucky_${LUCKY_CORE_VERSION}_Linux_arm64.tar.gz"
+          if ! curl -fsIL --retry 3 --retry-delay 2 "$LUCKY_ASSET_URL" >/dev/null; then
+            echo "Lucky asset not found: $LUCKY_ASSET_URL"
+            echo "Fallback to Lucky 2.27.2, whose Linux_arm64 asset exists in GitHub releases."
+            LUCKY_CORE_VERSION="2.27.2"
+          fi
+          if [ -f package/lucky/lucky/Makefile ]; then
+            # Makefile 可能被压成很长的一行，不能只用 ^PKG_VERSION 匹配。
+            LUCKY_CORE_VERSION="$LUCKY_CORE_VERSION" perl -0pi -e 's/PKG_VERSION:=[^ \n\r]+/PKG_VERSION:=$ENV{LUCKY_CORE_VERSION}/g' package/lucky/lucky/Makefile
+            perl -0pi -e 's/PKG_RELEASE:=[^ \n\r]+/PKG_RELEASE:=1/g' package/lucky/lucky/Makefile
+            grep -oE "PKG_NAME:=lucky|PKG_VERSION:=[^ ]+|PKG_HASH:=[^ ]+" package/lucky/lucky/Makefile || true
+          fi
+
+          git clone --depth=1 "https://github.com/laipeng668/luci-app-gecoosac.git" package/luci-app-gecoosac
+          git clone --depth=1 "https://github.com/eamonxg/luci-theme-aurora.git" package/luci-theme-aurora
+          git clone --depth=1 "https://github.com/eamonxg/luci-app-aurora-config.git" package/luci-app-aurora-config
+          
+          git clone --depth=1 -b kix "https://github.com/QiuSimons/luci-app-daed.git" package/dae || \
+          git clone --depth=1 "https://github.com/QiuSimons/luci-app-daed.git" package/dae
+
+      - name: Create default first-boot settings
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          set -euxo pipefail
+          
+          mkdir -p files/etc/uci-defaults
+          
+          cat > files/etc/uci-defaults/99-xg040gmd-defaults <<'EOF'
+          #!/bin/sh
+          
+          BOARD_NAME="$(cat /tmp/sysinfo/board_name 2>/dev/null)"
+          [ "$BOARD_NAME" = "bell,xg-040g-md" ] || exit 0
+          
+          LAN_IP="__LAN_IP__"
+          WAN_PORT="__WAN_PORT__"
+          
+          case "$WAN_PORT" in
+            lan2|lan3|lan4) ;;
+            *) WAN_PORT="lan2" ;;
+          esac
+          
+          LAN_PORTS="eth1"
+          for p in lan2 lan3 lan4; do
+            [ "$p" = "$WAN_PORT" ] || LAN_PORTS="$LAN_PORTS $p"
+          done
+          
+          # 默认 LuCI 语言：简体中文；默认主题：Aurora
+          uci -q batch <<EOT
+          set luci.main.lang='zh_cn'
+          set luci.main.mediaurlbase='/luci-static/aurora'
+          set luci.languages.zh_cn='简体中文'
+          set luci.languages.en='English'
+          commit luci
+          EOT
+          
+          # eth1 是 2.5G 口，固定作为 LAN；WAN 默认使用 lan2，可在 Actions 的 wan_port 改为 lan3/lan4。
+          uci -q batch <<EOT
+          delete network.wan
+          delete network.wan6
+          
+          set network.br_lan='device'
+          set network.br_lan.name='br-lan'
+          set network.br_lan.type='bridge'
+          delete network.br_lan.ports
+          
+          set network.lan='interface'
+          set network.lan.device='br-lan'
+          set network.lan.proto='static'
+          set network.lan.ipaddr='$LAN_IP'
+          set network.lan.netmask='255.255.255.0'
+          set network.lan.ip6assign='60'
+          
+          set network.wan='interface'
+          set network.wan.device='$WAN_PORT'
+          set network.wan.proto='dhcp'
+          
+          set network.wan6='interface'
+          set network.wan6.device='@wan'
+          set network.wan6.proto='dhcpv6'
+          
+          commit network
+          EOT
+          
+          for p in $LAN_PORTS; do
+            uci add_list network.br_lan.ports="$p"
+          done
+          uci commit network
+          
+          # 重建最小默认防火墙，确保 WAN 能 NAT 上网。
+          while uci -q delete firewall.@zone[0]; do :; done
+          while uci -q delete firewall.@forwarding[0]; do :; done
+          uci -q batch <<EOT
+          add firewall zone
+          set firewall.@zone[-1].name='lan'
+          add_list firewall.@zone[-1].network='lan'
+          set firewall.@zone[-1].input='ACCEPT'
+          set firewall.@zone[-1].output='ACCEPT'
+          set firewall.@zone[-1].forward='ACCEPT'
+          
+          add firewall zone
+          set firewall.@zone[-1].name='wan'
+          add_list firewall.@zone[-1].network='wan'
+          add_list firewall.@zone[-1].network='wan6'
+          set firewall.@zone[-1].input='REJECT'
+          set firewall.@zone[-1].output='ACCEPT'
+          set firewall.@zone[-1].forward='REJECT'
+          set firewall.@zone[-1].masq='1'
+          set firewall.@zone[-1].mtu_fix='1'
+          
+          add firewall forwarding
+          set firewall.@forwarding[-1].src='lan'
+          set firewall.@forwarding[-1].dest='wan'
+          commit firewall
+          EOT
+          
+          # PPPoE 稳定优先：默认关闭软件/硬件 Flow Offloading，避免 NAT 加速路径绕过或干扰 PPPoE。
+          uci -q batch <<EOT
+          set firewall.@defaults[0].flow_offloading='0'
+          set firewall.@defaults[0].flow_offloading_hw='0'
+          commit firewall
+          set network.globals='globals'
+          set network.globals.packet_steering='1'
+          commit network
+          EOT
+
+          # 稳定优先的网卡启动参数：不动常规校验和/TSO/GSO，只关闭容易触发硬件路径的 hw-tc-offload / rx-gro-hw。
+          cat > /etc/init.d/xg040gmd-stable-net <<'EOS'
+          #!/bin/sh /etc/rc.common
+          START=18
+          USE_PROCD=1
+          start_service() {
+            for dev in eth0 eth1 lan1 lan2 lan3 lan4 wan; do
+              ip link show "$dev" >/dev/null 2>&1 || continue
+              ethtool -K "$dev" hw-tc-offload off 2>/dev/null || true
+              ethtool -K "$dev" rx-gro-hw off 2>/dev/null || true
+            done
+          }
+          EOS
+          chmod +x /etc/init.d/xg040gmd-stable-net
+          /etc/init.d/xg040gmd-stable-net enable
+
+          [ -x /etc/init.d/irqbalance ] && /etc/init.d/irqbalance enable
+          [ -x /etc/init.d/zram ] && /etc/init.d/zram enable
+          # 插件保留，但默认不自启，避免首启内存占用过高或代理/端口转发规则干扰排障。
+          [ -x /etc/init.d/daed ] && /etc/init.d/daed disable
+          [ -x /etc/init.d/lucky ] && /etc/init.d/lucky disable
+          
+          rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+          
+          exit 0
+          EOF
+          
+          sed -i "s/__LAN_IP__/${{ inputs.lan_ip }}/g" files/etc/uci-defaults/99-xg040gmd-defaults
+          sed -i "s/__WAN_PORT__/${{ inputs.wan_port }}/g" files/etc/uci-defaults/99-xg040gmd-defaults
+          chmod +x files/etc/uci-defaults/99-xg040gmd-defaults
+
+      - name: Generate .config
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          cat > .config <<'EOF'
+          # XG-040G-MD ImmortalWrt + Daed stable PPPoE build config, no kernel BTF
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y
+          # CONFIG_PACKAGE_airoha-en7581-npu-firmware is not set
+          
+          # CONFIG_DEVEL is not set
+          # CONFIG_KERNEL_DEBUG_INFO is not set
+          # CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+          # CONFIG_KERNEL_DEBUG_INFO_BTF is not set
+          CONFIG_KERNEL_CGROUPS=y
+          CONFIG_KERNEL_CGROUP_BPF=y
+          CONFIG_KERNEL_BPF_EVENTS=y
+          # CONFIG_BPF_TOOLCHAIN_HOST is not set
+          CONFIG_KERNEL_XDP_SOCKETS=y
+          CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
+          # CONFIG_DAED_USE_KERNEL_BTF is not set
+          # CONFIG_DAED_USE_VMLINUX_BTF is not set
+          
+          CONFIG_PACKAGE_luci=y
+          CONFIG_PACKAGE_luci-ssl=y
+          CONFIG_PACKAGE_luci-compat=y
+          CONFIG_PACKAGE_luci-base=y
+          CONFIG_PACKAGE_firewall4=y
+          CONFIG_PACKAGE_nftables-json=y
+          CONFIG_PACKAGE_ppp=y
+          CONFIG_PACKAGE_ppp-mod-pppoe=y
+          CONFIG_PACKAGE_kmod-ppp=y
+          CONFIG_PACKAGE_kmod-pppoe=y
+          CONFIG_PACKAGE_kmod-pppox=y
+          CONFIG_PACKAGE_kmod-slhc=y
+          CONFIG_PACKAGE_irqbalance=y
+          CONFIG_PACKAGE_ethtool=y
+          CONFIG_PACKAGE_ip-full=y
+          
+          CONFIG_LUCI_LANG_zh_Hans=y
+          # CONFIG_LUCI_LANG_zh_Hant is not set
+          
+          CONFIG_PACKAGE_luci-mod-admin-full=y
+          CONFIG_PACKAGE_luci-mod-network=y
+          CONFIG_PACKAGE_luci-mod-status=y
+          CONFIG_PACKAGE_luci-mod-system=y
+          
+          CONFIG_PACKAGE_luci-i18n-base-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-firewall-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-opkg-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-package-manager-zh-cn=y
+          CONFIG_PACKAGE_luci-i18n-ttyd-zh-cn=y
+          
+          CONFIG_PACKAGE_luci-theme-aurora=y
+          CONFIG_PACKAGE_luci-app-aurora-config=y
+          
+          CONFIG_PACKAGE_lucky=y
+          CONFIG_PACKAGE_luci-app-lucky=y
+          CONFIG_PACKAGE_luci-i18n-lucky-zh-cn=y
+          
+          CONFIG_PACKAGE_dae=y
+          CONFIG_PACKAGE_daed=y
+          CONFIG_PACKAGE_luci-app-daed=y
+          CONFIG_PACKAGE_luci-i18n-daed-zh-cn=y
+          CONFIG_PACKAGE_kmod-sched-core=y
+          CONFIG_PACKAGE_kmod-sched-bpf=y
+          CONFIG_PACKAGE_kmod-veth=y
+          CONFIG_PACKAGE_v2ray-geoip=y
+          CONFIG_PACKAGE_v2ray-geosite=y
+          CONFIG_PACKAGE_zoneinfo-asia=y
+          
+          CONFIG_PACKAGE_microsocks=y
+          CONFIG_PACKAGE_luci-app-microsocks=y
+          CONFIG_PACKAGE_luci-i18n-microsocks-zh-cn=y
+          
+          CONFIG_PACKAGE_gecoosac=y
+          CONFIG_PACKAGE_luci-app-gecoosac=y
+          
+          CONFIG_PACKAGE_zram-swap=y
+          CONFIG_PACKAGE_kmod-zram=y
+          
+          CONFIG_PACKAGE_ca-bundle=y
+          CONFIG_PACKAGE_curl=y
+          CONFIG_PACKAGE_htop=y
+          CONFIG_PACKAGE_nano=y
+          CONFIG_PACKAGE_openssh-sftp-server=y
+          CONFIG_PACKAGE_luci-app-ttyd=y
+          
+          CONFIG_PACKAGE_kmod-usb-storage=y
+          CONFIG_PACKAGE_kmod-usb-storage-uas=y
+          CONFIG_PACKAGE_kmod-fs-exfat=y
+          CONFIG_PACKAGE_kmod-fs-ext4=y
+          CONFIG_PACKAGE_kmod-fs-ntfs3=y
+          CONFIG_PACKAGE_block-mount=y
+          CONFIG_PACKAGE_blkid=y
+          CONFIG_PACKAGE_lsblk=y
+          
+          CONFIG_PACKAGE_uboot-envtools=y
+          CONFIG_PACKAGE_ubi-utils=y
+          EOF
+          
+          make defconfig
+          
+          echo "===== Selected target ====="
+          grep -E "CONFIG_TARGET_airoha|bell_xg|bell-xg|xg-040" .config || true
+          
+          echo "===== Check Chinese LuCI packages ====="
+          grep -E "CONFIG_LUCI_LANG_zh_Hans|CONFIG_PACKAGE_luci-i18n-base-zh-cn|CONFIG_PACKAGE_luci-i18n-firewall-zh-cn|CONFIG_PACKAGE_luci-i18n-opkg-zh-cn" .config || true
+          
+          echo "===== Check daed packages ====="
+          grep -E "CONFIG_PACKAGE_dae|CONFIG_PACKAGE_daed|CONFIG_PACKAGE_luci-app-daed|CONFIG_DAED_USE_KERNEL_BTF|CONFIG_KERNEL_DEBUG_INFO_BTF|CONFIG_KERNEL_XDP_SOCKETS" .config || true
+          echo "===== BTF-related diffconfig ====="
+          ./scripts/diffconfig.sh | grep -E "BTF|DEBUG_INFO|DAED|XDP" || true
+
+          echo "===== Check PPPoE / stability packages ====="
+          grep -E "CONFIG_PACKAGE_ppp|CONFIG_PACKAGE_kmod-pppoe|CONFIG_PACKAGE_ethtool|CONFIG_PACKAGE_irqbalance|CONFIG_PACKAGE_airoha-en7581.*npu" .config || true
+          
+          grep -q "^CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-040g-md=y" .config
+          grep -q "^CONFIG_PACKAGE_ppp-mod-pppoe=y" .config
+          grep -q "^CONFIG_PACKAGE_kmod-pppoe=y" .config
+          grep -q "^CONFIG_PACKAGE_ethtool=y" .config
+          grep -q "^CONFIG_LUCI_LANG_zh_Hans=y" .config
+          grep -q "^CONFIG_PACKAGE_luci-app-daed=y" .config
+          
+          if ! grep -q "^CONFIG_PACKAGE_luci-i18n-base-zh-cn=y" .config; then
+            echo "WARNING: luci-i18n-base-zh-cn was not selected directly after defconfig."
+            echo "CONFIG_LUCI_LANG_zh_Hans=y is enabled, so LuCI zh-cn translation packages should be selected through LuCI language defaults during package resolution."
+          fi
+
+      - name: Download package sources
+        working-directory: openwrt
+        shell: bash
+        run: |
+          make download -j"$(nproc)" || make download -j1 V=s
+
+      - name: Build firmware
+        working-directory: openwrt
+        shell: bash
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" || make -j1 V=s 2>&1 | tee ../build-v8.log
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG-040G-MD-ImmortalWrt-Daed-v8-build-log
+          path: build-v8.log
+          if-no-files-found: ignore
+
+      - name: Prepare artifacts
+        working-directory: openwrt
+        shell: bash
+        run: |
+          
+          mkdir -p ../artifact
+          cp -vf bin/targets/airoha/an7581/*xg-040g-md* ../artifact/ 2>/dev/null || true
+          cp -vf bin/targets/airoha/an7581/sha256sums ../artifact/ 2>/dev/null || true
+          find ../artifact -maxdepth 1 -type f -print
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG-040G-MD-ImmortalWrt-Daed-Stable-PPPoE-NoBTF-Elfutils-Hardfix
+          path: artifact/*
