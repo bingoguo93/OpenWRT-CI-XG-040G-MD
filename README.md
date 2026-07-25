@@ -7,10 +7,10 @@ https://www.right.com.cn/forum/thread-8453612-1-1.html
 支持设备： 四个固件通用，设备名称只是区分不同功能 
 
 带USB设备:
-  XG-040G-MD(lan4 wan)  XG-140G-MD(2.5g wan)
+  XG-040G-MD  XG-140G-MD(lan4 wan)
 
 不带USB设备: 
-  XG-040G-TF(lan4 wan)  XG-140G-TF(2.5g wan)
+  XG-040G-TF  XG-140G-TF(lan4 wan)
 
 https://github.com/bingoguo93/immortalwrt.git
 
