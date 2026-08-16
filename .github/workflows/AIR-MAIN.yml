@@ -2,7 +2,7 @@
 # Copyright (C) 2026 VIKINGYFY
 
 #CI项目
-name: AIR-LEDE
+name: AIR-MAIN
 
 #CI计划
 on:
