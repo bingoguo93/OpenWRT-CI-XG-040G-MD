@@ -7,17 +7,14 @@
 #
 CONFIG_TARGET_airoha=y
 CONFIG_TARGET_airoha_an7581=y
-CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-040g-md=y
-CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-040g-tf=y
-CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-140g-md=y
-CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-140g-tf=y
 CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
 CONFIG_KERNEL_DEVMEM=y
 CONFIG_BUSYBOX_CUSTOM=y
 CONFIG_BUSYBOX_CONFIG_DEVMEM=y
 CONFIG_PACKAGE_kmod-dummy=y
-CONFIG_DEFAULT_airoha-en7581-npu-firmware=y
 CONFIG_PACKAGE_airoha-en7581-npu-firmware=y
+CONFIG_PACKAGE_airoha-en7581-mt7996-npu-firmware=y
+CONFIG_PACKAGE_airoha-en8811h-firmware=y
 #soc 状态
 CONFIG_PACKAGE_luci-app-airoha-npu=y
 CONFIG_PACKAGE_vlmcsd=n

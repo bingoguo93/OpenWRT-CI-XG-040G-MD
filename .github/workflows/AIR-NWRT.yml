@@ -2,7 +2,7 @@
 # Copyright (C) 2026 VIKINGYFY
 
 #CI项目
-name: AIR-LEDE
+name: AIR-ALL
 
 #CI计划
 on:
@@ -35,9 +35,9 @@ jobs:
       fail-fast: false
       #max-parallel: 3
       matrix:
-        CONFIG: [AIROHA-WIFI-NO]
-        SOURCE: [coolsnowwolf/lede]
-        BRANCH: [master]
+        CONFIG: [AIROHA-NWRT]
+        SOURCE: [bingoguo93/immortalwrt]
+        BRANCH: [6.18]
 
     #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
@@ -45,7 +45,7 @@ jobs:
       #编译配置
       WRT_CONFIG: ${{matrix.CONFIG}}
       #默认主题
-      WRT_THEME: argon
+      WRT_THEME: aurora
       #默认主机名
       WRT_NAME: OWRT
       #默认WIFI名称
