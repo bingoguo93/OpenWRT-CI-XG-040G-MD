@@ -74,3 +74,6 @@ if [[ "${WRT_TARGET^^}" == *"QUALCOMMAX"* ]]; then
 		echo "qualcommax set up nowifi successfully!"
 	fi
 fi
+
+#调整网口顺序
+sed -i 's/ucidef_set_interface_lan "lan1 lan2 lan3 lan4"/ucidef_set_interfaces_lan_wan "lan2 lan3 lan4" "lan1"/g' target/linux/airoha/an7581/base-files/etc/board.d/02_network
