@@ -1,6 +1,8 @@
 # OpenWRT-CI
 
 贝尔040G系列，全面升级6.18内核  
+刷机前必须备份所有原厂分区，特别是ri和bosa分区
+
 详细说明  
 https://www.right.com.cn/forum/thread-8453612-1-1.html
 
