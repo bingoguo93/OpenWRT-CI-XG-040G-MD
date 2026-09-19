@@ -34,8 +34,7 @@ Alignment:   1
 Size:        9 LEBs (1142784 bytes, 1.0 MiB)
 State:       OK
 Name:       bosa
-Character device major/minor: 252:1
------------------------------------
+
 Volume ID:   1 (on ubi0)
 Type:        dynamic
 Alignment:   1
