@@ -17,7 +17,7 @@ https://www.right.com.cn/forum/thread-8453612-1-1.html
 https://github.com/bingoguo93/immortalwrt.git
 
 # 恢复MAC地址说明
-刷机前必须备份所有原厂分区，特别是ri和bosa分区（以下为040-MD的分区）
+刷机前必须备份所有原厂分区，特别是ri和bosa分区，参考详细说明刷回备份
 
 
 # 固件简要说明
