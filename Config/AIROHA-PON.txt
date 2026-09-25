@@ -1,0 +1,44 @@
+#
+# Automatically generated file; DO NOT EDIT.
+# ImmortalWrt Configuration
+#
+# Target Devices
+#
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5382a=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5585f-ct=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_fiberhome_hg5585f-cu=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_gemtek_xg2010g=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_nokia_xg-040g-tf-ubi=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_unionman_ung00a=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_znxt_zn504xg-d=y
+CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_znxt_zn515xg-d=y
+#
+# NPU
+#
+CONFIG_KERNEL_DEVMEM=y
+CONFIG_BUSYBOX_CUSTOM=y
+CONFIG_BUSYBOX_CONFIG_DEVMEM=y
+CONFIG_PACKAGE_kmod-dummy=y
+CONFIG_PACKAGE_airoha-en7581-npu-firmware=y
+CONFIG_PACKAGE_airoha-en7581-mt7996-npu-firmware=y
+CONFIG_PACKAGE_airoha-en8811h-firmware=y
+# NPU 状态
+CONFIG_PACKAGE_luci-app-airoha-npu=y
+CONFIG_PACKAGE_vlmcsd=n
+#
+# PON
+#
+CONFIG_MODULE_DEFAULT_kmod-airoha-en7572=y
+CONFIG_MODULE_DEFAULT_kmod-airoha-paged-bosa=y
+CONFIG_MODULE_DEFAULT_kmod-airoha-xpon=y
+CONFIG_PACKAGE_kmod-airoha-en7572=m
+CONFIG_PACKAGE_kmod-airoha-paged-bosa=m
+CONFIG_PACKAGE_kmod-airoha-pon-frontend=y
+CONFIG_PACKAGE_kmod-airoha-xpon=y
+CONFIG_PACKAGE_airoha-pon-debug=y
+CONFIG_PACKAGE_airoha-ponctl=y
+CONFIG_PACKAGE_airoha-pond=y
+
+#luci
+CONFIG_PACKAGE_luci-app-pon=y
