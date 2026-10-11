@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
+#CI项目
 name: AIR-TCBOOT
 
+#CI计划
 on:
+  #定时检查上游（每 6 小时，UTC）
+  schedule:
+    - cron: "0 */6 * * *"
+  #手动编译
   workflow_dispatch:
     inputs:
       PACKAGE:
@@ -15,55 +21,109 @@ on:
         default: 'false'
         required: false
         type: boolean
-      UPSTREAM_SHA:
-        description: '由 Check-Upstream 传入，勿手动填写。'
-        required: false
-        type: string
 
+#CI权限
 permissions:
   contents: write        # 收尾 job 需要 push .upstream-sha
 
+#上游监控的比对目标
+env:
+  UPSTREAM_REPO: https://github.com/bingoguo93/immortalwrt.git
+  UPSTREAM_BRANCH: 6.18
+  SHA_FILE: .upstream-sha
+
+#CI任务
 jobs:
+  #检查上游是否有新提交
+  precheck:
+    name: 检查上游
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 比对上游 SHA
+        id: check
+        run: |
+          HEAD_SHA=$(git ls-remote "$UPSTREAM_REPO" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
+          LAST_SHA=$(cat "$SHA_FILE" 2>/dev/null || echo "none")
+          echo "上游当前: $HEAD_SHA"
+          echo "上次记录: $LAST_SHA"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "手动运行：直接编译"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HEAD_SHA" != "$LAST_SHA" ]; then
+            echo "上游有更新：$LAST_SHA → $HEAD_SHA"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "上游无更新，跳过编译"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+  #编译：手动运行总是编译，定时运行只在上游有更新时编译
   config:
     name: ${{matrix.CONFIG}}
+    needs: precheck
+    if: needs.precheck.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
         CONFIG: [AIROHA-TCBOOT]
         SOURCE: [bingoguo93/immortalwrt]
         BRANCH: [6.18]
+
+    #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
     with:
+      #编译配置
       WRT_CONFIG: ${{matrix.CONFIG}}
+      #默认主题
       WRT_THEME: argon
+      #默认主机名
       WRT_NAME: OWRT
+      #默认WIFI名称
       WRT_SSID: OWRT
+      #默认WIFI密码
       WRT_WORD: 12345678
+      #默认地址
       WRT_IP: 192.168.1.1
+      #默认密码，仅作提示，修改无用
       WRT_PW: 无
+      #源码链接
       WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
+      #源码分支
       WRT_BRANCH: ${{matrix.BRANCH}}
+      #源码名称
       WRT_SOURCE: ${{matrix.SOURCE}}
+      #插件调整
       WRT_PACKAGE: ${{inputs.PACKAGE}}
+      #仅输出配置文件
       WRT_TEST: ${{inputs.TEST}}
 
-  #仅当编译成功、且由 Check-Upstream 派发时，才记录上游 SHA
+  #编译成功后记录上游 SHA
   record_sha:
     name: 记录上游 SHA
-    needs: config
-    if: inputs.UPSTREAM_SHA != ''
+    needs: [precheck, config]
+    if: |
+      always() &&
+      needs.config.result == 'success' &&
+      inputs.TEST != true && inputs.TEST != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: 保存 SHA
         env:
-          UPSTREAM_SHA: ${{ inputs.UPSTREAM_SHA }}
+          SHA: ${{ needs.precheck.outputs.sha }}
         run: |
-          echo "$UPSTREAM_SHA" > .upstream-sha
+          echo "记录上游 SHA: $SHA"
+          echo "$SHA" > "$SHA_FILE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .upstream-sha
+          git add "$SHA_FILE"
           git diff --cached --quiet && exit 0
-          git commit -m "chore: 编译成功，记录上游 SHA $UPSTREAM_SHA"
+          git commit -m "chore: 编译成功，记录上游 SHA $SHA"
           git push
