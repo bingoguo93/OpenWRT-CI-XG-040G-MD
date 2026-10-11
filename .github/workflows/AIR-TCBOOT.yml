@@ -4,10 +4,6 @@
 name: AIR-TCBOOT
 
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - '.upstream-sha'
   workflow_dispatch:
     inputs:
       PACKAGE:
