@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-#CI项目
 name: AIR-TCBOOT
 
-#CI计划
 on:
-  #手动编译（由 Check-Upstream 自动派发，或人工点击）
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - '.upstream-sha'
   workflow_dispatch:
     inputs:
       PACKAGE:
@@ -18,46 +19,55 @@ on:
         default: 'false'
         required: false
         type: boolean
+      UPSTREAM_SHA:
+        description: '由 Check-Upstream 传入，勿手动填写。'
+        required: false
+        type: string
 
-#CI权限
-permissions: write-all
+permissions:
+  contents: write        # 收尾 job 需要 push .upstream-sha
 
-#CI任务
 jobs:
   config:
     name: ${{matrix.CONFIG}}
     strategy:
       fail-fast: false
-      #max-parallel: 3
       matrix:
         CONFIG: [AIROHA-TCBOOT]
         SOURCE: [bingoguo93/immortalwrt]
         BRANCH: [6.18]
-
-    #调用公用编译核心WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
     with:
-      #编译配置
       WRT_CONFIG: ${{matrix.CONFIG}}
-      #默认主题
       WRT_THEME: argon
-      #默认主机名
       WRT_NAME: OWRT
-      #默认WIFI名称
       WRT_SSID: OWRT
-      #默认WIFI密码
       WRT_WORD: 12345678
-      #默认地址
       WRT_IP: 192.168.1.1
-      #默认密码，仅作提示，修改无用
       WRT_PW: 无
-      #源码链接
       WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
-      #源码分支
       WRT_BRANCH: ${{matrix.BRANCH}}
-      #源码名称
       WRT_SOURCE: ${{matrix.SOURCE}}
-      #插件调整
       WRT_PACKAGE: ${{inputs.PACKAGE}}
-      #仅输出配置文件
       WRT_TEST: ${{inputs.TEST}}
+
+  #仅当编译成功、且由 Check-Upstream 派发时，才记录上游 SHA
+  record_sha:
+    name: 记录上游 SHA
+    needs: config
+    if: inputs.UPSTREAM_SHA != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 保存 SHA
+        env:
+          UPSTREAM_SHA: ${{ inputs.UPSTREAM_SHA }}
+        run: |
+          echo "$UPSTREAM_SHA" > .upstream-sha
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .upstream-sha
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: 编译成功，记录上游 SHA $UPSTREAM_SHA"
+          git push
