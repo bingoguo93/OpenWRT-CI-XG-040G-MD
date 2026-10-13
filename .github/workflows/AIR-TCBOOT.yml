@@ -28,9 +28,7 @@ permissions:
 
 #上游监控的比对目标
 env:
-  UPSTREAM_REPO: https://github.com/bingoguo93/immortalwrt.git
-  UPSTREAM_BRANCH: 6.18
-  SHA_FILE: .upstream-sha
+  SHA_FILE: SHA/${WRT_SOURCE}.${WRT_BRANCH}-sha
 
 #CI任务
 jobs:
@@ -47,7 +45,7 @@ jobs:
       - name: 比对上游 SHA
         id: check
         run: |
-          HEAD_SHA=$(git ls-remote "$UPSTREAM_REPO" "refs/heads/$UPSTREAM_BRANCH" | cut -f1)
+          HEAD_SHA=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | cut -f1)
           LAST_SHA=$(cat "$SHA_FILE" 2>/dev/null || echo "none")
           echo "上游当前: $HEAD_SHA"
           echo "上次记录: $LAST_SHA"
