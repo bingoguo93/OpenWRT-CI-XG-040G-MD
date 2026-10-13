@@ -1,55 +1,70 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-#CI项目
 name: AIR-TCBOOT
 
-#CI计划
 on:
-  #定时检查上游（每 6 小时，UTC）
   schedule:
-    - cron: "0 */6 * * *"
-  #手动编译
+    - cron: "0 */6 * * *"   # 每 6 小时，UTC
   workflow_dispatch:
     inputs:
       PACKAGE:
-        description: '手动调整插件包，多个请用\n符号隔开。'
+        description: '手动调整插件包，多个请用换行分隔。'
         required: false
         type: string
       TEST:
         description: '仅输出配置文件，不编译固件。'
-        default: 'false'
+        default: false
         required: false
         type: boolean
 
-#CI权限
 permissions:
-  contents: write        # 收尾 job 需要 push .upstream-sha
+  contents: write          # record_sha 需要 push SHA 文件
 
-#上游监控的比对目标
-env:
-  SHA_FILE: SHA/${WRT_SOURCE}.${WRT_BRANCH}-sha
+# 防止定时任务与手动任务同时 push 冲突
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
-#CI任务
 jobs:
-  #检查上游是否有新提交
+  # 检查上游是否有新提交（同时作为仓库/分支/SHA 文件名的唯一数据源）
   precheck:
     name: 检查上游
     runs-on: ubuntu-latest
+    env:
+      WRT_SOURCE: bingoguo93/immortalwrt
+      WRT_BRANCH: "6.18"
+      WRT_REPO: https://github.com/bingoguo93/immortalwrt.git
+      # 文件名不能带 "/"，这里把 SOURCE 里的 "/" 替换掉
+      SHA_FILE: SHA/bingoguo93-immortalwrt.6.18-sha
     outputs:
       build: ${{ steps.check.outputs.build }}
       sha: ${{ steps.check.outputs.sha }}
+      sha_file: ${{ steps.check.outputs.sha_file }}
+      wrt_source: ${{ steps.check.outputs.wrt_source }}
+      wrt_branch: ${{ steps.check.outputs.wrt_branch }}
+      wrt_repo: ${{ steps.check.outputs.wrt_repo }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 比对上游 SHA
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          mkdir -p "$(dirname "$SHA_FILE")"
+
           HEAD_SHA=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | cut -f1)
+          if [ -z "$HEAD_SHA" ]; then
+            echo "::error::无法获取 $WRT_REPO @ $WRT_BRANCH 的 SHA"
+            exit 1
+          fi
+
           LAST_SHA=$(cat "$SHA_FILE" 2>/dev/null || echo "none")
           echo "上游当前: $HEAD_SHA"
           echo "上次记录: $LAST_SHA"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "手动运行：直接编译"
             echo "build=true" >> "$GITHUB_OUTPUT"
           elif [ "$HEAD_SHA" != "$LAST_SHA" ]; then
@@ -59,56 +74,47 @@ jobs:
             echo "上游无更新，跳过编译"
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
-  #编译：手动运行总是编译，定时运行只在上游有更新时编译
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "sha_file=$SHA_FILE" >> "$GITHUB_OUTPUT"
+          echo "wrt_source=$WRT_SOURCE" >> "$GITHUB_OUTPUT"
+          echo "wrt_branch=$WRT_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "wrt_repo=$WRT_REPO" >> "$GITHUB_OUTPUT"
+
+  # 编译：手动总是编译，定时只在上游有更新时编译
   config:
-    name: ${{matrix.CONFIG}}
+    name: ${{ matrix.CONFIG }}
     needs: precheck
     if: needs.precheck.outputs.build == 'true'
     strategy:
       fail-fast: false
       matrix:
         CONFIG: [AIROHA-TCBOOT]
-        SOURCE: [bingoguo93/immortalwrt]
-        BRANCH: [6.18]
 
-    #调用公用编译核心WRT-CORE.yml
+    # 调用公用编译核心 WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
     with:
-      #编译配置
-      WRT_CONFIG: ${{matrix.CONFIG}}
-      #默认主题
+      WRT_CONFIG: ${{ matrix.CONFIG }}
       WRT_THEME: argon
-      #默认主机名
       WRT_NAME: OWRT
-      #默认WIFI名称
       WRT_SSID: OWRT
-      #默认WIFI密码
-      WRT_WORD: 12345678
-      #默认地址
+      WRT_WORD: "12345678"
       WRT_IP: 192.168.1.1
-      #默认密码，仅作提示，修改无用
       WRT_PW: 无
-      #源码链接
-      WRT_REPO: https://github.com/${{matrix.SOURCE}}.git
-      #源码分支
-      WRT_BRANCH: ${{matrix.BRANCH}}
-      #源码名称
-      WRT_SOURCE: ${{matrix.SOURCE}}
-      #插件调整
-      WRT_PACKAGE: ${{inputs.PACKAGE}}
-      #仅输出配置文件
-      WRT_TEST: ${{inputs.TEST}}
+      WRT_REPO: ${{ needs.precheck.outputs.wrt_repo }}
+      WRT_BRANCH: ${{ needs.precheck.outputs.wrt_branch }}
+      WRT_SOURCE: ${{ needs.precheck.outputs.wrt_source }}
+      WRT_PACKAGE: ${{ inputs.PACKAGE || '' }}
+      WRT_TEST: ${{ inputs.TEST == true }}
 
-  #编译成功后记录上游 SHA
+  # 编译成功后记录上游 SHA
   record_sha:
     name: 记录上游 SHA
     needs: [precheck, config]
     if: |
-      always() &&
+      !cancelled() &&
       needs.config.result == 'success' &&
-      inputs.TEST != true && inputs.TEST != 'true'
+      inputs.TEST != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -116,8 +122,10 @@ jobs:
       - name: 保存 SHA
         env:
           SHA: ${{ needs.precheck.outputs.sha }}
+          SHA_FILE: ${{ needs.precheck.outputs.sha_file }}
         run: |
           echo "记录上游 SHA: $SHA"
+          mkdir -p "$(dirname "$SHA_FILE")"
           echo "$SHA" > "$SHA_FILE"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
