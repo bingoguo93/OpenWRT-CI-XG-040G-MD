@@ -5,7 +5,7 @@ name: AIR-TCBOOT
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 每 6 小时，UTC
+    - cron: "0 3 * * *"   # 每天3点 UTC
   workflow_dispatch:
     inputs:
       PACKAGE:
