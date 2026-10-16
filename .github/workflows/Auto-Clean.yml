@@ -3,10 +3,13 @@
 
 name: Auto-Clean
 
+#CI计划
 on:
-  #自动清理：每天早上5点
-  schedule:
-    - cron: 0 17 * * *
+  #自动编译：当AIR-TCBOOT运行完成后
+  workflow_run:
+    workflows: ["AIR-TCBOOT"]
+    types:
+      - completed
   #手动清理
   workflow_dispatch:
 
