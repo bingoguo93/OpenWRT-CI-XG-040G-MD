@@ -95,7 +95,7 @@ jobs:
     uses: ./.github/workflows/WRT-CORE.yml
     with:
       WRT_CONFIG: ${{ matrix.CONFIG }}
-      WRT_THEME: argon
+      WRT_THEME: footstrap
       WRT_NAME: OWRT
       WRT_SSID: OWRT
       WRT_WORD: "12345678"
