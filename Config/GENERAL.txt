@@ -1,11 +1,13 @@
 #科学插件调整
 #nikki
-CONFIG_PACKAGE_luci-app-nikki=y
-CONFIG_PACKAGE_mihomo=y
+#CONFIG_PACKAGE_luci-app-nikki=y
+#CONFIG_PACKAGE_mihomo=y
+CONFIG_PACKAGE_luci-app-openclash=y
 
 #ssr plus
 CONFIG_PACKAGE_luci-app-ssr-plus=y
 CONFIG_PACKAGE_xray-core=y
+
 #lucky
 CONFIG_PACKAGE_luci-app-lucky=y
 #增加插件
