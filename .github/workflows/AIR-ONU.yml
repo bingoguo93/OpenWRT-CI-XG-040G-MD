@@ -34,7 +34,7 @@ jobs:
     env:
       WRT_SOURCE: pbs05/ponwrt
       WRT_BRANCH: "master"
-      WRT_REPO: https://github.com/${WRT_SOURCE}
+      WRT_REPO: https://github.com/$WRT_SOURCE
       # 文件名不能带 "/"，这里把 SOURCE 里的 "/" 替换掉
       SHA_FILE: SHA/$WRT_BRANCH-sha
     outputs:
@@ -54,9 +54,9 @@ jobs:
         run: |
           mkdir -p "$(dirname "$SHA_FILE")"
 
-          HEAD_SHA=$(git ls-remote "$WRT_REPO" "refs/heads/$WRT_BRANCH" | cut -f1)
+          HEAD_SHA=$(git ls-remote "https://github.com/$WRT_SOURCE" "refs/heads/$WRT_BRANCH" | cut -f1)
           if [ -z "$HEAD_SHA" ]; then
-            echo "::error::无法获取 $WRT_REPO @ $WRT_BRANCH 的 SHA"
+            echo "::error::无法获取 https://github.com/$WRT_SOURCE @ $WRT_BRANCH 的 SHA"
             exit 1
           fi
 
@@ -79,7 +79,7 @@ jobs:
           echo "sha_file=$SHA_FILE" >> "$GITHUB_OUTPUT"
           echo "wrt_source=$WRT_SOURCE" >> "$GITHUB_OUTPUT"
           echo "wrt_branch=$WRT_BRANCH" >> "$GITHUB_OUTPUT"
-          echo "wrt_repo=$WRT_REPO" >> "$GITHUB_OUTPUT"
+          echo "wrt_repo=https://github.com/$WRT_SOURCE" >> "$GITHUB_OUTPUT"
 
   # 编译：手动总是编译，定时只在上游有更新时编译
   config:
