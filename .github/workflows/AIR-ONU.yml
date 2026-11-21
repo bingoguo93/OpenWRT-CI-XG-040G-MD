@@ -89,7 +89,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        CONFIG: [AIROHA-TCBOOT]
+        CONFIG: [AIROHA-ONU]
 
     # 调用公用编译核心 WRT-CORE.yml
     uses: ./.github/workflows/WRT-CORE.yml
