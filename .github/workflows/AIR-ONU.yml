@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 VIKINGYFY
 
-name: AIR-TCBOOT
+name: AIR-ONU
 
 on:
   schedule:
