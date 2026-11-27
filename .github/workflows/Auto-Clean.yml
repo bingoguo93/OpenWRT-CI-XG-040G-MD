@@ -5,7 +5,7 @@ name: Auto-Clean
 
 #CI计划
 on:
-  #自动编译：当AIR-TCBOOT运行完成后
+  #自动编译：当上游流水线运行完成后，自动触发
   workflow_run:
     workflows: ["AIR-ONU"]
     types:
